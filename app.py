@@ -815,6 +815,8 @@ with st.sidebar:
 
 # --- MAIN DASHBOARD ---
 
+# Alternatif yang lebih clean:
+
 # SECTION 1: LAST 3 MONTHS PERFORMANCE (DIPERBESAR)
 st.subheader("🎯 Forecast Performance - 3 Bulan Terakhir")
 
@@ -830,47 +832,41 @@ if last_3_months_performance:
         accuracy = data['accuracy']
         
         with month_cols[i]:
-            html_content = f"""
-<div style="
-    background: white; 
-    border-radius: 15px; 
-    padding: 1.5rem; 
-    margin: 0.5rem 0;
-    box-shadow: 0 6px 20px rgba(0,0,0,0.1);
-    border-top: 5px solid #667eea;
-">
-    <div style="text-align: center; margin-bottom: 1rem;">
-        <h3 style="margin: 0; color: #333;">{month_name}</h3>
-        <div style="font-size: 2rem; font-weight: 900; color: #667eea;">
-            {accuracy:.1f}%
-        </div>
-        <div style="font-size: 0.9rem; color: #666;">Overall Accuracy</div>
-    </div>
-    
-    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 1rem;">
-        <div style="text-align: center; padding: 0.5rem; background: #FFEBEE; border-radius: 8px;">
-            <div style="font-size: 1.5rem; font-weight: 900; color: #F44336;">{data['status_counts'].get('Under', 0)}</div>
-            <div style="font-size: 0.8rem; color: #F44336;">Under</div>
-        </div>
-        <div style="text-align: center; padding: 0.5rem; background: #E8F5E9; border-radius: 8px;">
-            <div style="font-size: 1.5rem; font-weight: 900; color: #4CAF50;">{data['status_counts'].get('Accurate', 0)}</div>
-            <div style="font-size: 0.8rem; color: #4CAF50;">Accurate</div>
-        </div>
-        <div style="text-align: center; padding: 0.5rem; background: #FFF3E0; border-radius: 8px;">
-            <div style="font-size: 1.5rem; font-weight: 900; color: #FF9800;">{data['status_counts'].get('Over', 0)}</div>
-            <div style="font-size: 0.8rem; color: #FF9800;">Over</div>
-        </div>
-    </div>
-    
-    <div style="text-align: center; font-size: 0.9rem; color: #666;">
-        Total SKUs: {data['total_records']}
-    </div>
-</div>
-"""
+            under_count = data['status_counts'].get('Under', 0)
+            accurate_count = data['status_counts'].get('Accurate', 0)
+            over_count = data['status_counts'].get('Over', 0)
+            total_records = data['total_records']
+            
+            # Create HTML dengan single line f-string
+            html_content = (
+                f'<div style="background: white; border-radius: 15px; padding: 1.5rem; margin: 0.5rem 0; box-shadow: 0 6px 20px rgba(0,0,0,0.1); border-top: 5px solid #667eea;">'
+                f'<div style="text-align: center; margin-bottom: 1rem;">'
+                f'<h3 style="margin: 0; color: #333;">{month_name}</h3>'
+                f'<div style="font-size: 2rem; font-weight: 900; color: #667eea;">{accuracy:.1f}%</div>'
+                f'<div style="font-size: 0.9rem; color: #666;">Overall Accuracy</div>'
+                f'</div>'
+                f'<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 1rem;">'
+                f'<div style="text-align: center; padding: 0.5rem; background: #FFEBEE; border-radius: 8px;">'
+                f'<div style="font-size: 1.5rem; font-weight: 900; color: #F44336;">{under_count}</div>'
+                f'<div style="font-size: 0.8rem; color: #F44336;">Under</div>'
+                f'</div>'
+                f'<div style="text-align: center; padding: 0.5rem; background: #E8F5E9; border-radius: 8px;">'
+                f'<div style="font-size: 1.5rem; font-weight: 900; color: #4CAF50;">{accurate_count}</div>'
+                f'<div style="font-size: 0.8rem; color: #4CAF50;">Accurate</div>'
+                f'</div>'
+                f'<div style="text-align: center; padding: 0.5rem; background: #FFF3E0; border-radius: 8px;">'
+                f'<div style="font-size: 1.5rem; font-weight: 900; color: #FF9800;">{over_count}</div>'
+                f'<div style="font-size: 0.8rem; color: #FF9800;">Over</div>'
+                f'</div>'
+                f'</div>'
+                f'<div style="text-align: center; font-size: 0.9rem; color: #666;">Total SKUs: {total_records}</div>'
+                f'</div>'
+            )
+            
             st.markdown(html_content, unsafe_allow_html=True)
         
         months_display.append(month_name)
-    
+        
     # TOTAL METRICS - BULAN TERAKHIR (dengan Qty dan persentase)
     st.divider()
     st.subheader("📊 Total Metrics - Bulan Terakhir")
@@ -901,61 +897,53 @@ if last_3_months_performance:
         accurate_forecast_pct = (accurate_forecast_qty / total_forecast_qty * 100) if total_forecast_qty > 0 else 0
         over_forecast_pct = (over_forecast_qty / total_forecast_qty * 100) if total_forecast_qty > 0 else 0
     
-    # Layout untuk Total Metrics bulan terakhir
+        # Layout untuk Total Metrics bulan terakhir
     col_total1, col_total2, col_total3, col_total4 = st.columns(4)
     
     with col_total1:
-        html_under = f"""
-<div style="background: white; border-radius: 10px; padding: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-left: 4px solid #F44336;">
-    <div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">UNDER FORECAST</div>
-    <div style="font-size: 1.5rem; font-weight: 800; color: #F44336;">{under_count} SKUs</div>
-    <div style="font-size: 0.9rem; color: #888;">Qty: {under_forecast_qty:,.0f}</div>
-    <div style="font-size: 0.8rem; color: #999;">
-        SKU: {under_pct:.1f}% | Qty: {under_forecast_pct:.1f}%
-    </div>
-</div>
-"""
+        html_under = (
+            f'<div style="background: white; border-radius: 10px; padding: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-left: 4px solid #F44336;">'
+            f'<div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">UNDER FORECAST</div>'
+            f'<div style="font-size: 1.5rem; font-weight: 800; color: #F44336;">{under_count} SKUs</div>'
+            f'<div style="font-size: 0.9rem; color: #888;">Qty: {under_forecast_qty:,.0f}</div>'
+            f'<div style="font-size: 0.8rem; color: #999;">SKU: {under_pct:.1f}% | Qty: {under_forecast_pct:.1f}%</div>'
+            f'</div>'
+        )
         st.markdown(html_under, unsafe_allow_html=True)
     
     with col_total2:
-        html_accurate = f"""
-<div style="background: white; border-radius: 10px; padding: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-left: 4px solid #4CAF50;">
-    <div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">ACCURATE FORECAST</div>
-    <div style="font-size: 1.5rem; font-weight: 800; color: #4CAF50;">{accurate_count} SKUs</div>
-    <div style="font-size: 0.9rem; color: #888;">Qty: {accurate_forecast_qty:,.0f}</div>
-    <div style="font-size: 0.8rem; color: #999;">
-        SKU: {accurate_pct:.1f}% | Qty: {accurate_forecast_pct:.1f}%
-    </div>
-</div>
-"""
+        html_accurate = (
+            f'<div style="background: white; border-radius: 10px; padding: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-left: 4px solid #4CAF50;">'
+            f'<div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">ACCURATE FORECAST</div>'
+            f'<div style="font-size: 1.5rem; font-weight: 800; color: #4CAF50;">{accurate_count} SKUs</div>'
+            f'<div style="font-size: 0.9rem; color: #888;">Qty: {accurate_forecast_qty:,.0f}</div>'
+            f'<div style="font-size: 0.8rem; color: #999;">SKU: {accurate_pct:.1f}% | Qty: {accurate_forecast_pct:.1f}%</div>'
+            f'</div>'
+        )
         st.markdown(html_accurate, unsafe_allow_html=True)
     
     with col_total3:
-        html_over = f"""
-<div style="background: white; border-radius: 10px; padding: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-left: 4px solid #FF9800;">
-    <div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">OVER FORECAST</div>
-    <div style="font-size: 1.5rem; font-weight: 800; color: #FF9800;">{over_count} SKUs</div>
-    <div style="font-size: 0.9rem; color: #888;">Qty: {over_forecast_qty:,.0f}</div>
-    <div style="font-size: 0.8rem; color: #999;">
-        SKU: {over_pct:.1f}% | Qty: {over_forecast_pct:.1f}%
-    </div>
-</div>
-"""
+        html_over = (
+            f'<div style="background: white; border-radius: 10px; padding: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-left: 4px solid #FF9800;">'
+            f'<div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">OVER FORECAST</div>'
+            f'<div style="font-size: 1.5rem; font-weight: 800; color: #FF9800;">{over_count} SKUs</div>'
+            f'<div style="font-size: 0.9rem; color: #888;">Qty: {over_forecast_qty:,.0f}</div>'
+            f'<div style="font-size: 0.8rem; color: #999;">SKU: {over_pct:.1f}% | Qty: {over_forecast_pct:.1f}%</div>'
+            f'</div>'
+        )
         st.markdown(html_over, unsafe_allow_html=True)
     
     with col_total4:
         # Calculate overall accuracy for last month
         last_month_accuracy = monthly_performance[last_month]['accuracy']
-        html_overall = f"""
-<div style="background: white; border-radius: 10px; padding: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-left: 4px solid #667eea;">
-    <div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">OVERALL</div>
-    <div style="font-size: 1.8rem; font-weight: 800; color: #667eea;">{last_month_accuracy:.1f}%</div>
-    <div style="font-size: 0.9rem; color: #888;">{last_month.strftime('%b %Y')}</div>
-    <div style="font-size: 0.8rem; color: #999;">
-        Total SKUs: {total_count_last_month}
-    </div>
-</div>
-"""
+        html_overall = (
+            f'<div style="background: white; border-radius: 10px; padding: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-left: 4px solid #667eea;">'
+            f'<div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">OVERALL</div>'
+            f'<div style="font-size: 1.8rem; font-weight: 800; color: #667eea;">{last_month_accuracy:.1f}%</div>'
+            f'<div style="font-size: 0.9rem; color: #888;">{last_month.strftime("%b %Y")}</div>'
+            f'<div style="font-size: 0.8rem; color: #999;">Total SKUs: {total_count_last_month}</div>'
+            f'</div>'
+        )
         st.markdown(html_overall, unsafe_allow_html=True)
     
     # Summary stats for last month
