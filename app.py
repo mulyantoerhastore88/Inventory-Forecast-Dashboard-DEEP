@@ -880,7 +880,7 @@ if monthly_performance:
             hoverinfo='skip'
         ))
         
-        # Update layout
+        # Update layout dengan format yang lebih sederhana
         fig.update_layout(
             height=500,
             title=dict(
@@ -903,7 +903,6 @@ if monthly_performance:
                 gridcolor='rgba(0,0,0,0.05)',
                 showline=True,
                 linecolor='rgba(0,0,0,0.1)',
-                range=[max(0, summary_df['Accuracy (%)'].min() - 10), min(100, summary_df['Accuracy (%)'].max() + 10)],
                 ticksuffix="%"
             ),
             plot_bgcolor='white',
@@ -914,8 +913,14 @@ if monthly_performance:
         )
         
         # Add threshold lines
-        fig.add_hline(y=80, line_dash="dash", line_color="green", opacity=0.5, annotation_text="Target: 80%")
-        fig.add_hline(y=100, line_dash="dash", line_color="blue", opacity=0.5)
+        fig.add_hline(y=80, line_dash="dash", line_color="green", opacity=0.5)
+        fig.add_annotation(
+            x=0, y=80,
+            text="Target: 80%",
+            showarrow=False,
+            yshift=10,
+            font=dict(color="green", size=10)
+        )
         
         st.plotly_chart(fig, use_container_width=True)
 
@@ -1557,10 +1562,10 @@ with tab3:
 with tab4:
     st.subheader("🔍 SKU Performance Evaluation")
     
-    if monthly_performance:
+    if monthly_performance and not df_sales.empty:
         # Get last month for evaluation
         last_month = sorted(monthly_performance.keys())[-1]
-        last_month_data = monthly_performance[last_month]['data']
+        last_month_data = monthly_performance[last_month]['data'].copy()
         
         # Get last 3 months sales data for each SKU
         if not df_sales.empty:
@@ -1570,30 +1575,31 @@ with tab4:
                 df_sales_last_3 = df_sales[df_sales['Month'].isin(last_3_sales_months)].copy()
                 
                 # Pivot sales data to get last 3 months sales per SKU
-                sales_pivot = df_sales_last_3.pivot_table(
-                    index='SKU_ID',
-                    columns='Month',
-                    values='Sales_Qty',
-                    aggfunc='sum',
-                    fill_value=0
-                ).reset_index()
-                
-                # Rename columns to month names
-                month_names = []
-                for col in sales_pivot.columns:
-                    if isinstance(col, datetime):
-                        month_names.append(col.strftime('%b-%Y'))
-                    else:
-                        month_names.append(col)
-                sales_pivot.columns = month_names
-                
-                # Merge with last month data
-                last_month_data = pd.merge(
-                    last_month_data,
-                    sales_pivot,
-                    on='SKU_ID',
-                    how='left'
-                )
+                try:
+                    sales_pivot = df_sales_last_3.pivot_table(
+                        index='SKU_ID',
+                        columns='Month',
+                        values='Sales_Qty',
+                        aggfunc='sum',
+                        fill_value=0
+                    ).reset_index()
+                    
+                    # Rename columns to month names
+                    month_rename = {}
+                    for col in sales_pivot.columns:
+                        if isinstance(col, datetime):
+                            month_rename[col] = col.strftime('%b-%Y')
+                    sales_pivot = sales_pivot.rename(columns=month_rename)
+                    
+                    # Merge with last month data
+                    last_month_data = pd.merge(
+                        last_month_data,
+                        sales_pivot,
+                        on='SKU_ID',
+                        how='left'
+                    )
+                except Exception as e:
+                    st.warning(f"Tidak bisa memproses data sales 3 bulan terakhir: {str(e)}")
         
         # Add inventory data
         if 'inventory_df' in inventory_metrics:
@@ -1601,8 +1607,6 @@ with tab4:
             last_month_data = pd.merge(last_month_data, inventory_data, on='SKU_ID', how='left')
         
         # Create comprehensive evaluation table
-        # PERUBAHAN 3: Remove sort_option and add SKU filter
-        
         # Filter by SKU (PERUBAHAN 3)
         sku_filter = st.text_input("🔍 Filter by SKU ID or Product Name", "")
         
@@ -1610,7 +1614,7 @@ with tab4:
         if sku_filter:
             filtered_eval_df = last_month_data[
                 last_month_data['SKU_ID'].astype(str).str.contains(sku_filter, case=False, na=False) |
-                last_month_data['Product_Name'].astype(str).str.contains(sku_filter, case=False, na=False)
+                (last_month_data['Product_Name'].astype(str).str.contains(sku_filter, case=False, na=False) if 'Product_Name' in last_month_data.columns else False)
             ].copy()
         else:
             filtered_eval_df = last_month_data.copy()
@@ -1618,8 +1622,13 @@ with tab4:
         # Determine which sales columns to show
         sales_cols = []
         for col in filtered_eval_df.columns:
-            if isinstance(col, str) and '-' in col and len(col) == 8:  # Assuming format like 'Sep-2024'
-                sales_cols.append(col)
+            if isinstance(col, str) and '-' in col and len(col) in [7, 8]:  # Format like 'Sep-2024' or 'Mar-2025'
+                try:
+                    # Validate it's a proper month-year format
+                    datetime.strptime(col, '%b-%Y')
+                    sales_cols.append(col)
+                except:
+                    pass
         
         # Sort sales columns chronologically
         if sales_cols:
@@ -1637,19 +1646,24 @@ with tab4:
         # Add sales columns
         eval_cols.extend(sales_cols_sorted)
         
+        # Filter hanya kolom yang ada
         available_cols = [col for col in eval_cols if col in filtered_eval_df.columns]
+        
+        # Pastikan Product_Name selalu ada
+        if 'Product_Name' not in available_cols and 'Product_Name' in filtered_eval_df.columns:
+            available_cols.insert(1, 'Product_Name')
         
         eval_df = filtered_eval_df[available_cols].copy()
         
         # Format columns
         if 'PO_Rofo_Ratio' in eval_df.columns:
-            eval_df['PO_Rofo_Ratio'] = eval_df['PO_Rofo_Ratio'].apply(lambda x: f"{x:.1f}%")
+            eval_df['PO_Rofo_Ratio'] = eval_df['PO_Rofo_Ratio'].apply(lambda x: f"{x:.1f}%" if pd.notnull(x) else "0%")
         
         if 'Cover_Months' in eval_df.columns:
-            eval_df['Cover_Months'] = eval_df['Cover_Months'].apply(lambda x: f"{x:.1f}" if x < 999 else "N/A")
+            eval_df['Cover_Months'] = eval_df['Cover_Months'].apply(lambda x: f"{x:.1f}" if pd.notnull(x) and x < 999 else "N/A")
         
         if 'Avg_Monthly_Sales_3M' in eval_df.columns:
-            eval_df['Avg_Monthly_Sales_3M'] = eval_df['Avg_Monthly_Sales_3M'].apply(lambda x: f"{x:.0f}")
+            eval_df['Avg_Monthly_Sales_3M'] = eval_df['Avg_Monthly_Sales_3M'].apply(lambda x: f"{x:.0f}" if pd.notnull(x) else "0")
         
         # Format sales columns
         for col in sales_cols_sorted:
@@ -1679,7 +1693,11 @@ with tab4:
         # Reorder columns
         column_order = ['SKU ID', 'Product Name', 'Brand', 'Tier', 'Forecast', 'PO', 
                        'PO/Rofo %', 'Stock', 'Avg Sales (L3M)', 'Cover (Months)']
-        column_order.extend(sales_cols_sorted)
+        
+        # Tambahkan sales columns ke urutan
+        for col in sales_cols_sorted:
+            if col in eval_df.columns:
+                column_order.append(col)
         
         # Ensure all columns exist before reordering
         existing_columns = [col for col in column_order if col in eval_df.columns]
@@ -1690,6 +1708,8 @@ with tab4:
             use_container_width=True,
             height=600
         )
+    else:
+        st.info("📊 Insufficient data for SKU evaluation")
 
 # --- TAB 5: SALES ANALYSIS ---
 with tab5:
