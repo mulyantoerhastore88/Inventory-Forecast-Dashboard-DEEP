@@ -882,31 +882,25 @@ if monthly_performance:
             hoverinfo='skip'
         ))
         
-        # Update layout dengan format yang lebih sederhana
+        # Update layout yang SEDERHANA tanpa parameter bermasalah
         fig.update_layout(
             height=500,
-            title=dict(
-                text="<b>Forecast Accuracy Trend Over Time</b>",
-                font=dict(size=20, color='#333'),
-                x=0.5
-            ),
-            xaxis=dict(
-                title="<b>Month-Year</b>",
-                titlefont=dict(size=14, color='#666'),
-                tickfont=dict(size=12, color='#666'),
-                gridcolor='rgba(0,0,0,0.05)',
-                showline=True,
-                linecolor='rgba(0,0,0,0.1)'
-            ),
-            yaxis=dict(
-                title="<b>Accuracy (%)</b>",
-                titlefont=dict(size=14, color='#666'),
-                tickfont=dict(size=12, color='#666'),
-                gridcolor='rgba(0,0,0,0.05)',
-                showline=True,
-                linecolor='rgba(0,0,0,0.1)',
-                ticksuffix="%"
-            ),
+            title_text="<b>Forecast Accuracy Trend Over Time</b>",
+            title_font=dict(size=20, color='#333'),
+            title_x=0.5,
+            xaxis_title="<b>Month-Year</b>",
+            xaxis_title_font=dict(size=14, color='#666'),
+            xaxis_tickfont=dict(size=12, color='#666'),
+            xaxis_gridcolor='rgba(0,0,0,0.05)',
+            xaxis_showline=True,
+            xaxis_linecolor='rgba(0,0,0,0.1)',
+            yaxis_title="<b>Accuracy (%)</b>",
+            yaxis_title_font=dict(size=14, color='#666'),
+            yaxis_tickfont=dict(size=12, color='#666'),
+            yaxis_gridcolor='rgba(0,0,0,0.05)',
+            yaxis_showline=True,
+            yaxis_linecolor='rgba(0,0,0,0.1)',
+            yaxis_ticksuffix="%",
             plot_bgcolor='white',
             paper_bgcolor='white',
             hovermode='x unified',
@@ -916,13 +910,6 @@ if monthly_performance:
         
         # Add threshold lines
         fig.add_hline(y=80, line_dash="dash", line_color="green", opacity=0.5)
-        fig.add_annotation(
-            x=0, y=80,
-            text="Target: 80%",
-            showarrow=False,
-            yshift=10,
-            font=dict(color="green", size=10)
-        )
         
         st.plotly_chart(fig, use_container_width=True)
 
