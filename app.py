@@ -241,6 +241,30 @@ def parse_month_label(label):
     except:
         return datetime.now()
 
+def add_product_info_to_data(df, df_product):
+    """Add Product_Name, Brand, SKU_Tier from Product_Master to any dataframe"""
+    if df.empty or df_product.empty or 'SKU_ID' not in df.columns:
+        return df
+    
+    # Get product info from Product_Master
+    product_info = df_product[['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier']].copy()
+    product_info = product_info.drop_duplicates(subset=['SKU_ID'])
+    
+    # Remove existing columns if they exist (except SKU_ID)
+    cols_to_remove = []
+    for col in ['Product_Name', 'Brand', 'SKU_Tier']:
+        if col in df.columns:
+            cols_to_remove.append(col)
+    
+    if cols_to_remove:
+        df_temp = df.drop(columns=cols_to_remove)
+    else:
+        df_temp = df.copy()
+    
+    # Merge with product info
+    df_result = pd.merge(df_temp, product_info, on='SKU_ID', how='left')
+    return df_result
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_and_process_data(_client):
     """Load dan proses semua data sekaligus"""
@@ -249,7 +273,7 @@ def load_and_process_data(_client):
     data = {}
     
     try:
-        # 1. PRODUCT MASTER
+        # 1. PRODUCT MASTER (SUMBER UTAMA PRODUCT_INFO)
         ws = _client.open_by_url(gsheet_url).worksheet("Product_Master")
         df_product = pd.DataFrame(ws.get_all_records())
         df_product.columns = [col.strip().replace(' ', '_') for col in df_product.columns]
@@ -259,6 +283,7 @@ def load_and_process_data(_client):
             df_product['Status'] = 'Active'
         
         df_product_active = df_product[df_product['Status'].str.upper() == 'ACTIVE'].copy()
+        active_skus = df_product_active['SKU_ID'].tolist()
         
         # 2. SALES DATA
         ws_sales = _client.open_by_url(gsheet_url).worksheet("Sales")
@@ -287,8 +312,10 @@ def load_and_process_data(_client):
             df_sales_long['Month'] = df_sales_long['Month_Label'].apply(parse_month_label)
             
             # Filter active SKUs
-            active_skus = df_product_active['SKU_ID'].tolist()
             df_sales_long = df_sales_long[df_sales_long['SKU_ID'].isin(active_skus)]
+            
+            # ADD PRODUCT INFO LOOKUP
+            df_sales_long = add_product_info_to_data(df_sales_long, df_product)
             
             data['sales'] = df_sales_long
         
@@ -316,6 +343,9 @@ def load_and_process_data(_client):
             df_rofo_long['Month'] = df_rofo_long['Month_Label'].apply(parse_month_label)
             df_rofo_long = df_rofo_long[df_rofo_long['SKU_ID'].isin(active_skus)]
             
+            # ADD PRODUCT INFO LOOKUP
+            df_rofo_long = add_product_info_to_data(df_rofo_long, df_product)
+            
             data['forecast'] = df_rofo_long
         
         # 4. PO DATA
@@ -336,6 +366,9 @@ def load_and_process_data(_client):
             df_po_long['PO_Qty'] = pd.to_numeric(df_po_long['PO_Qty'], errors='coerce').fillna(0)
             df_po_long['Month'] = df_po_long['Month_Label'].apply(parse_month_label)
             df_po_long = df_po_long[df_po_long['SKU_ID'].isin(active_skus)]
+            
+            # ADD PRODUCT INFO LOOKUP
+            df_po_long = add_product_info_to_data(df_po_long, df_product)
             
             data['po'] = df_po_long
         
@@ -358,6 +391,9 @@ def load_and_process_data(_client):
             
             df_stock = df_stock.groupby('SKU_ID')['Stock_Qty'].max().reset_index()
             df_stock = df_stock[df_stock['SKU_ID'].isin(active_skus)]
+            
+            # ADD PRODUCT INFO LOOKUP
+            df_stock = add_product_info_to_data(df_stock, df_product)
             
             data['stock'] = df_stock
         
@@ -383,6 +419,10 @@ def calculate_monthly_performance(df_forecast, df_po, df_product):
         return monthly_performance
     
     try:
+        # ADD PRODUCT INFO jika belum ada
+        df_forecast = add_product_info_to_data(df_forecast, df_product)
+        df_po = add_product_info_to_data(df_po, df_product)
+        
         # Get unique months from both datasets
         forecast_months = sorted(df_forecast['Month'].unique())
         po_months = sorted(df_po['Month'].unique())
@@ -406,10 +446,9 @@ def calculate_monthly_performance(df_forecast, df_po, df_product):
             )
             
             if not df_merged.empty:
-                # Add product info
-                if not df_product.empty:
-                    product_info = df_product[['SKU_ID', 'Product_Name', 'SKU_Tier', 'Brand']].drop_duplicates()
-                    df_merged = pd.merge(df_merged, product_info, on='SKU_ID', how='left')
+                # Add product info (jika belum ada dari merge)
+                if 'Product_Name' not in df_merged.columns or 'Brand' not in df_merged.columns:
+                    df_merged = add_product_info_to_data(df_merged, df_product)
                 
                 # Calculate ratio
                 df_merged['PO_Rofo_Ratio'] = np.where(
@@ -484,6 +523,10 @@ def calculate_inventory_metrics_with_3month_avg(df_stock, df_sales, df_product):
         return metrics
     
     try:
+        # ADD PRODUCT INFO jika belum ada
+        df_stock = add_product_info_to_data(df_stock, df_product)
+        df_sales = add_product_info_to_data(df_sales, df_product)
+        
         # Get last 3 months sales data
         if not df_sales.empty:
             sales_months = sorted(df_sales['Month'].unique())
@@ -574,6 +617,11 @@ def calculate_sales_vs_forecast_po(df_sales, df_forecast, df_po, df_product):
         return results
     
     try:
+        # ADD PRODUCT INFO jika belum ada
+        df_sales = add_product_info_to_data(df_sales, df_product)
+        df_forecast = add_product_info_to_data(df_forecast, df_product)
+        df_po = add_product_info_to_data(df_po, df_product)
+        
         # Get last 3 months for comparison
         sales_months = sorted(df_sales['Month'].unique())
         forecast_months = sorted(df_forecast['Month'].unique())
@@ -609,9 +657,7 @@ def calculate_sales_vs_forecast_po(df_sales, df_forecast, df_po, df_product):
         )
         
         # Add product info
-        if not df_product.empty:
-            product_info = df_product[['SKU_ID', 'Product_Name', 'SKU_Tier', 'Brand']].drop_duplicates()
-            df_merged = pd.merge(df_merged, product_info, on='SKU_ID', how='left')
+        df_merged = add_product_info_to_data(df_merged, df_product)
         
         # Calculate ratios
         df_merged['Sales_vs_Forecast_Ratio'] = np.where(
@@ -664,6 +710,10 @@ def calculate_brand_performance(df_forecast, df_po, df_product):
         return pd.DataFrame()
     
     try:
+        # ADD PRODUCT INFO jika belum ada
+        df_forecast = add_product_info_to_data(df_forecast, df_product)
+        df_po = add_product_info_to_data(df_po, df_product)
+        
         # Get last month data
         forecast_months = sorted(df_forecast['Month'].unique())
         po_months = sorted(df_po['Month'].unique())
@@ -686,10 +736,9 @@ def calculate_brand_performance(df_forecast, df_po, df_product):
             how='inner'
         )
         
-        # Add brand info
-        if 'Brand' not in df_merged.columns and 'Brand' in df_product.columns:
-            brand_info = df_product[['SKU_ID', 'Brand']].drop_duplicates()
-            df_merged = pd.merge(df_merged, brand_info, on='SKU_ID', how='left')
+        # Add brand info jika belum ada
+        if 'Brand' not in df_merged.columns:
+            df_merged = add_product_info_to_data(df_merged, df_product)
         
         if 'Brand' not in df_merged.columns:
             return pd.DataFrame()
@@ -842,74 +891,28 @@ if monthly_performance:
         # Sort by month
         summary_df = summary_df.sort_values('Month')
         
-        # Create enhanced chart with Plotly
+        # Create enhanced chart dengan styling yang aman
         fig = go.Figure()
         
-        # Add line trace
         fig.add_trace(go.Scatter(
             x=summary_df['Month_Display'],
             y=summary_df['Accuracy (%)'],
             mode='lines+markers+text',
-            line=dict(color='#667eea', width=4, shape='spline'),
-            marker=dict(
-                size=12,
-                color='#764ba2',
-                symbol='circle',
-                line=dict(width=2, color='white')
-            ),
+            line=dict(color='#667eea', width=4),
+            marker=dict(size=12, color='#764ba2'),
             text=summary_df['Accuracy (%)'].apply(lambda x: f"{x:.1f}%"),
-            textposition="top center",
-            textfont=dict(size=12, color='#333'),
-            hoverinfo='text',
-            hovertext=[
-                f"<b>{row['Month_Display']}</b><br>"
-                f"Accuracy: {row['Accuracy (%)']:.1f}%<br>"
-                f"Under: {row['Under']}<br>"
-                f"Accurate: {row['Accurate']}<br>"
-                f"Over: {row['Over']}<br>"
-                f"Total SKUs: {row['Total SKUs']}"
-                for _, row in summary_df.iterrows()
-            ]
+            textposition="top center"
         ))
         
-        # Add area under the line
-        fig.add_trace(go.Scatter(
-            x=summary_df['Month_Display'],
-            y=summary_df['Accuracy (%)'],
-            fill='tozeroy',
-            mode='none',
-            fillcolor='rgba(102, 126, 234, 0.1)',
-            hoverinfo='skip'
-        ))
-        
-        # Update layout yang SEDERHANA tanpa parameter bermasalah
         fig.update_layout(
             height=500,
-            title_text="<b>Forecast Accuracy Trend Over Time</b>",
-            title_font=dict(size=20, color='#333'),
+            title_text='<b>Forecast Accuracy Trend Over Time</b>',
             title_x=0.5,
-            xaxis_title="<b>Month-Year</b>",
-            xaxis_title_font=dict(size=14, color='#666'),
-            xaxis_tickfont=dict(size=12, color='#666'),
-            xaxis_gridcolor='rgba(0,0,0,0.05)',
-            xaxis_showline=True,
-            xaxis_linecolor='rgba(0,0,0,0.1)',
-            yaxis_title="<b>Accuracy (%)</b>",
-            yaxis_title_font=dict(size=14, color='#666'),
-            yaxis_tickfont=dict(size=12, color='#666'),
-            yaxis_gridcolor='rgba(0,0,0,0.05)',
-            yaxis_showline=True,
-            yaxis_linecolor='rgba(0,0,0,0.1)',
+            xaxis_title='<b>Month-Year</b>',
+            yaxis_title='<b>Accuracy (%)</b>',
             yaxis_ticksuffix="%",
-            plot_bgcolor='white',
-            paper_bgcolor='white',
-            hovermode='x unified',
-            showlegend=False,
-            margin=dict(l=50, r=50, t=80, b=50)
+            plot_bgcolor='white'
         )
-        
-        # Add threshold lines
-        fig.add_hline(y=80, line_dash="dash", line_color="green", opacity=0.5)
         
         st.plotly_chart(fig, use_container_width=True)
 
@@ -1123,13 +1126,17 @@ if monthly_performance:
                     inventory_data = inventory_metrics['inventory_df'][['SKU_ID', 'Stock_Qty', 'Avg_Monthly_Sales_3M', 'Cover_Months']]
                     under_skus_df = pd.merge(under_skus_df, inventory_data, on='SKU_ID', how='left')
                 
-                # Prepare display columns - TAMBAHKAN Product_Name, Brand, Status
+                # Prepare display columns - WAJIB dengan Product_Name
                 display_cols = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier', 'Accuracy_Status',
                               'Forecast_Qty', 'PO_Qty', 'PO_Rofo_Ratio', 
                               'Stock_Qty', 'Avg_Monthly_Sales_3M', 'Cover_Months']
                 
                 # Filter available columns
                 available_cols = [col for col in display_cols if col in under_skus_df.columns]
+                
+                # Pastikan Product_Name selalu ada
+                if 'Product_Name' not in available_cols and 'Product_Name' in under_skus_df.columns:
+                    available_cols.insert(1, 'Product_Name')
                 
                 # Format the dataframe
                 display_df = under_skus_df[available_cols].copy()
@@ -1144,7 +1151,7 @@ if monthly_performance:
                 if 'Avg_Monthly_Sales_3M' in display_df.columns:
                     display_df['Avg_Monthly_Sales_3M'] = display_df['Avg_Monthly_Sales_3M'].apply(lambda x: f"{x:.0f}")
                 
-                # Rename columns for display
+                # Rename columns for display - WAJIB dengan Product Name
                 column_names = {
                     'SKU_ID': 'SKU ID',
                     'Product_Name': 'Product Name',
@@ -1190,13 +1197,17 @@ if monthly_performance:
                     inventory_data = inventory_metrics['inventory_df'][['SKU_ID', 'Stock_Qty', 'Avg_Monthly_Sales_3M', 'Cover_Months']]
                     over_skus_df = pd.merge(over_skus_df, inventory_data, on='SKU_ID', how='left')
                 
-                # Prepare display columns - TAMBAHKAN Product_Name, Brand, Status
+                # Prepare display columns - WAJIB dengan Product_Name
                 display_cols = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier', 'Accuracy_Status',
                               'Forecast_Qty', 'PO_Qty', 'PO_Rofo_Ratio', 
                               'Stock_Qty', 'Avg_Monthly_Sales_3M', 'Cover_Months']
                 
                 # Filter available columns
                 available_cols = [col for col in display_cols if col in over_skus_df.columns]
+                
+                # Pastikan Product_Name selalu ada
+                if 'Product_Name' not in available_cols and 'Product_Name' in over_skus_df.columns:
+                    available_cols.insert(1, 'Product_Name')
                 
                 # Format the dataframe
                 display_df = over_skus_df[available_cols].copy()
@@ -1211,7 +1222,7 @@ if monthly_performance:
                 if 'Avg_Monthly_Sales_3M' in display_df.columns:
                     display_df['Avg_Monthly_Sales_3M'] = display_df['Avg_Monthly_Sales_3M'].apply(lambda x: f"{x:.0f}")
                 
-                # Rename columns for display
+                # Rename columns for display - WAJIB dengan Product Name
                 column_names = {
                     'SKU_ID': 'SKU ID',
                     'Product_Name': 'Product Name',
@@ -1252,7 +1263,6 @@ if monthly_performance:
 st.divider()
 
 # --- MAIN TABS ---
-# PERUBAHAN 2: Menggabungkan Brand Performance ke Tab Tier Analysis
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📈 Monthly Performance Details",
     "🏷️ Forecast Performance by Brand & Tier Analysis",
@@ -1500,11 +1510,15 @@ with tab3:
         if tier_filter and 'SKU_Tier' in filtered_df.columns:
             filtered_df = filtered_df[filtered_df['SKU_Tier'].isin(tier_filter)]
         
-        # Prepare display columns
+        # Prepare display columns - WAJIB dengan Product_Name
         display_cols = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier', 'Inventory_Status', 
                        'Stock_Qty', 'Avg_Monthly_Sales_3M', 'Cover_Months']
         
         available_cols = [col for col in display_cols if col in filtered_df.columns]
+        
+        # Pastikan Product_Name selalu ada
+        if 'Product_Name' not in available_cols and 'Product_Name' in filtered_df.columns:
+            available_cols.insert(1, 'Product_Name')
         
         # Format the dataframe
         display_df = filtered_df[available_cols].copy()
@@ -1516,7 +1530,7 @@ with tab3:
         if 'Avg_Monthly_Sales_3M' in display_df.columns:
             display_df['Avg_Monthly_Sales_3M'] = display_df['Avg_Monthly_Sales_3M'].apply(lambda x: f"{x:.0f}")
         
-        # Rename columns for display
+        # Rename columns for display - WAJIB dengan Product Name
         column_names = {
             'SKU_ID': 'SKU ID',
             'Product_Name': 'Product Name',
@@ -1596,7 +1610,7 @@ with tab4:
             last_month_data = pd.merge(last_month_data, inventory_data, on='SKU_ID', how='left')
         
         # Create comprehensive evaluation table
-        # Filter by SKU (PERUBAHAN 3)
+        # Filter by SKU
         sku_filter = st.text_input("🔍 Filter by SKU ID or Product Name", "")
         
         # Apply filter
@@ -1627,7 +1641,7 @@ with tab4:
         else:
             sales_cols_sorted = []
         
-        # Define columns to display
+        # Define columns to display - WAJIB dengan Product_Name
         eval_cols = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier', 
                     'Forecast_Qty', 'PO_Qty', 'PO_Rofo_Ratio',
                     'Stock_Qty', 'Avg_Monthly_Sales_3M', 'Cover_Months']
@@ -1659,7 +1673,7 @@ with tab4:
             if col in eval_df.columns:
                 eval_df[col] = eval_df[col].apply(lambda x: f"{x:.0f}" if pd.notnull(x) else "0")
         
-        # Rename columns
+        # Rename columns - WAJIB dengan Product Name
         column_names = {
             'SKU_ID': 'SKU ID',
             'Product_Name': 'Product Name',
@@ -1745,13 +1759,17 @@ with tab5:
         high_dev_df = sales_vs_forecast['high_deviation_skus']
         
         if not high_dev_df.empty:
-            # Prepare display
+            # Prepare display - WAJIB dengan Product_Name
             display_cols = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier',
                           'Sales_Qty', 'Forecast_Qty', 'PO_Qty',
                           'Sales_vs_Forecast_Ratio', 'Sales_vs_PO_Ratio',
                           'Forecast_Deviation', 'PO_Deviation']
             
             available_cols = [col for col in display_cols if col in high_dev_df.columns]
+            
+            # Pastikan Product_Name selalu ada
+            if 'Product_Name' not in available_cols and 'Product_Name' in high_dev_df.columns:
+                available_cols.insert(1, 'Product_Name')
             
             display_df = high_dev_df[available_cols].copy()
             
@@ -1761,7 +1779,7 @@ with tab5:
                 if col in display_df.columns:
                     display_df[col] = display_df[col].apply(lambda x: f"{x:.1f}%")
             
-            # Rename columns
+            # Rename columns - WAJIB dengan Product Name
             column_names = {
                 'SKU_ID': 'SKU ID',
                 'Product_Name': 'Product Name',
@@ -1903,8 +1921,8 @@ with tab6:
 st.divider()
 st.markdown("""
 <div style="text-align: center; color: #666; font-size: 0.9rem; padding: 1rem;">
-    <p>🚀 <strong>Inventory Intelligence Dashboard v5.1</strong> | Professional Inventory Control & Demand Planning</p>
-    <p>✅ 3-Month Average Sales for Inventory | ✅ Monthly Performance Tracking | ✅ Detailed SKU Evaluation | ✅ Sales vs Forecast Analysis</p>
-    <p>📊 Using 3-month average sales for accurate inventory coverage calculation</p>
+    <p>🚀 <strong>Inventory Intelligence Dashboard v5.2</strong> | Professional Inventory Control & Demand Planning</p>
+    <p>✅ Product Name Auto-Lookup from Master Data | ✅ 3-Month Average Sales for Inventory | ✅ Monthly Performance Tracking</p>
+    <p>📊 All tables now show Product Name alongside SKU ID | 🔄 Automatic data enrichment from Product Master</p>
 </div>
 """, unsafe_allow_html=True)
