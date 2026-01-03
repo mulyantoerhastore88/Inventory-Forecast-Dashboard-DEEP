@@ -1995,18 +1995,27 @@ with tab5:
         last_month = sales_vs_forecast['last_month']
         last_month_name = last_month.strftime('%b %Y')
         
-        # SECTION 1: SIMPLE MONTHLY TREND
+                # SECTION 1: SIMPLE MONTHLY TREND
         st.markdown("### 📊 Monthly Trend")
         
-        # Get last 6 months data
+        # Get ALL available months, not just last 6
         monthly_trend = []
+        
+        # Get unique months from ALL datasets
+        all_months = set()
         if not df_sales.empty:
-            sales_months = sorted(df_sales['Month'].unique())
-            recent_months = sales_months[-6:] if len(sales_months) >= 6 else sales_months
+            all_months.update(df_sales['Month'].unique())
+        if not df_forecast.empty:
+            all_months.update(df_forecast['Month'].unique())
+        if not df_po.empty:
+            all_months.update(df_po['Month'].unique())
+        
+        if all_months:
+            sorted_months = sorted(all_months)
             
-            for month in recent_months:
+            for month in sorted_months:  # PAKAI SEMUA BULAN, bukan cuma 6 terakhir
                 month_name = month.strftime('%b-%Y')
-                sales_qty = df_sales[df_sales['Month'] == month]['Sales_Qty'].sum()
+                sales_qty = df_sales[df_sales['Month'] == month]['Sales_Qty'].sum() if not df_sales.empty else 0
                 forecast_qty = df_forecast[df_forecast['Month'] == month]['Forecast_Qty'].sum() if not df_forecast.empty else 0
                 po_qty = df_po[df_po['Month'] == month]['PO_Qty'].sum() if not df_po.empty else 0
                 
@@ -2019,6 +2028,9 @@ with tab5:
         
         if monthly_trend:
             trend_df = pd.DataFrame(monthly_trend)
+            
+            # Tampilkan info bulan yang tersedia
+            st.caption(f"📅 Showing data for {len(trend_df)} months")
             
             # CHART 1: Quantity Trend
             fig1 = go.Figure()
@@ -2046,7 +2058,7 @@ with tab5:
             
             fig1.update_layout(
                 height=400,
-                title='Monthly Trend: Rofo vs PO vs Sales',
+                title='Monthly Trend: Rofo vs PO vs Sales (All Available Months)',
                 xaxis_title='Month',
                 yaxis_title='Quantity',
                 barmode='group'
@@ -2058,7 +2070,7 @@ with tab5:
             if not df_forecast.empty and not df_po.empty:
                 accuracy_trend = []
                 
-                for month in recent_months:
+                for month in sorted_months:  # PAKAI SEMUA BULAN
                     month_name = month.strftime('%b-%Y')
                     forecast_qty = df_forecast[df_forecast['Month'] == month]['Forecast_Qty'].sum()
                     po_qty = df_po[df_po['Month'] == month]['PO_Qty'].sum()
@@ -2086,7 +2098,7 @@ with tab5:
                     
                     fig2.update_layout(
                         height=300,
-                        title='Forecast Accuracy Trend',
+                        title='Forecast Accuracy Trend (All Available Months)',
                         xaxis_title='Month',
                         yaxis_title='Accuracy %',
                         yaxis_range=[0, 110]
