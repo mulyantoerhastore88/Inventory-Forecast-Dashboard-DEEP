@@ -1996,10 +1996,10 @@ with tab4:
         existing_columns = [col for col in column_order if col in eval_df.columns]
         eval_df = eval_df[existing_columns]
         
-                st.dataframe(
+        st.dataframe(
             eval_df,
             use_container_width=True,
-            height=600
+            height=400
         )
         
         # ================ NEW: SKU DEEP DIVE ANALYSIS ================
@@ -2147,14 +2147,7 @@ with tab4:
                             range=[0, 110]
                         ),
                         barmode='group',
-                        plot_bgcolor='white',
-                        legend=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="right",
-                            x=1
-                        )
+                        plot_bgcolor='white'
                     )
                     
                     st.plotly_chart(fig_timeline, use_container_width=True)
@@ -2256,6 +2249,8 @@ with tab4:
                                     st.write(f"- {rec}")
                             else:
                                 st.success("✅ **Excellent**: This SKU is performing well across all metrics!")
+                else:
+                    st.warning("No historical data available for this SKU")
     else:
         st.info("📊 Insufficient data for SKU evaluation")
 
