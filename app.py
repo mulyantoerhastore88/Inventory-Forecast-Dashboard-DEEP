@@ -1294,58 +1294,40 @@ if monthly_performance:
                 selisih_persen = (selisih_qty / total_forecast * 100) if total_forecast > 0 else 0
                 
                 # TAMBAH: HTML dengan highlight
+                                # Versi sederhana
                 st.markdown(f"""
-                <div style="background: linear-gradient(135deg, #FFEBEE 0%, #FFCDD2 100%); border-left: 5px solid #F44336; border-radius: 10px; padding: 20px; margin: 20px 0; box-shadow: 0 4px 15px rgba(244, 67, 54, 0.2);">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <div>
-                            <div style="font-weight: 900; font-size: 18px; color: #C62828;">📉 UNDER FORECAST SUMMARY</div>
-                            <div style="font-size: 13px; color: #D32F2F;">Bulan: {last_month_name}</div>
+                <div style="background: #FFEBEE; border-left: 5px solid #F44336; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                    <h4 style="color: #C62828; margin-top: 0;">📉 UNDER FORECAST SUMMARY - {last_month_name}</h4>
+                    
+                    <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                        <div style="flex: 1; min-width: 150px; background: white; padding: 15px; border-radius: 8px; text-align: center;">
+                            <div style="font-size: 24px; color: #F44336; font-weight: bold;">{avg_ratio:.1f}%</div>
+                            <div style="font-size: 12px; color: #666;">Avg PO/Rofo</div>
                         </div>
-                        <div style="background: #FFF; padding: 5px 15px; border-radius: 20px; font-weight: bold; color: #F44336; border: 2px solid #F44336;">
-                            {len(under_skus_df)} SKUs
+                        
+                        <div style="flex: 1; min-width: 150px; background: white; padding: 15px; border-radius: 8px; text-align: center;">
+                            <div style="font-size: 22px; color: #2E7D32; font-weight: bold;">{total_forecast:,.0f}</div>
+                            <div style="font-size: 12px; color: #666;">Total Rofo</div>
+                        </div>
+                        
+                        <div style="flex: 1; min-width: 150px; background: white; padding: 15px; border-radius: 8px; text-align: center;">
+                            <div style="font-size: 22px; color: #1565C0; font-weight: bold;">{total_po:,.0f}</div>
+                            <div style="font-size: 12px; color: #666;">Total PO</div>
+                        </div>
+                        
+                        <div style="flex: 1; min-width: 150px; background: white; padding: 15px; border-radius: 8px; text-align: center;">
+                            <div style="font-size: 24px; color: {'#F44336' if selisih_qty < 0 else '#2E7D32'}; font-weight: bold;">{selisih_qty:+,.0f}</div>
+                            <div style="font-size: 12px; color: #666;">Selisih</div>
+                            <div style="font-size: 11px; color: {'#F44336' if selisih_qty < 0 else '#2E7D32'};">({selisih_persen:+.1f}%)</div>
                         </div>
                     </div>
                     
-                    <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px;">
-                        <div style="background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 3px 10px rgba(0,0,0,0.08);">
-                            <div style="font-size: 24px; font-weight: 900; color: #F44336; margin-bottom: 5px;">{avg_ratio:.1f}%</div>
-                            <div style="font-size: 12px; color: #666; font-weight: 600;">Avg PO/Rofo Ratio</div>
-                            <div style="font-size: 11px; color: #999;">Target: 80-120%</div>
-                        </div>
-                        
-                        <div style="background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 3px 10px rgba(0,0,0,0.08);">
-                            <div style="font-size: 22px; font-weight: 900; color: #2E7D32; margin-bottom: 5px;">{total_forecast:,.0f}</div>
-                            <div style="font-size: 12px; color: #666; font-weight: 600;">Total Rofo Qty</div>
-                            <div style="font-size: 11px; color: #999;">Forecast Quantity</div>
-                        </div>
-                        
-                        <div style="background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 3px 10px rgba(0,0,0,0.08);">
-                            <div style="font-size: 22px; font-weight: 900; color: #1565C0; margin-bottom: 5px;">{total_po:,.0f}</div>
-                            <div style="font-size: 12px; color: #666; font-weight: 600;">Total PO Qty</div>
-                            <div style="font-size: 11px; color: #999;">Purchase Order</div>
-                        </div>
-                        
-                        <div style="background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 3px 10px rgba(0,0,0,0.08);">
-                            <div style="font-size: 24px; font-weight: 900; color: {'#F44336' if selisih_qty < 0 else '#2E7D32'}; margin-bottom: 5px;">{selisih_qty:+,.0f}</div>
-                            <div style="font-size: 12px; color: #666; font-weight: 600;">Selisih Qty</div>
-                            <div style="font-size: 11px; color: {'#F44336' if selisih_qty < 0 else '#2E7D32'}; font-weight: 600;">({selisih_persen:+.1f}%)</div>
-                        </div>
-                        
-                        <div style="background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 3px 10px rgba(0,0,0,0.08);">
-                            <div style="font-size: 22px; font-weight: 900; color: #FF9800; margin-bottom: 5px;">{(total_po/total_forecast*100 if total_forecast > 0 else 0):.1f}%</div>
-                            <div style="font-size: 12px; color: #666; font-weight: 600;">PO/Rofo %</div>
-                            <div style="font-size: 11px; color: #999;">Overall Ratio</div>
-                        </div>
-                    </div>
-                    
-                    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed rgba(244, 67, 54, 0.3);">
-                        <div style="font-size: 13px; color: #666; text-align: center;">
-                            <span style="font-weight: 600;">Total UNDER Forecast SKUs: {len(under_skus_df)}</span> | 
-                            <span style="color: #F44336;">Average PO/Rofo Ratio: {avg_ratio:.1f}%</span> | 
-                            <span style="color: #2E7D32;">Total Forecast: {total_forecast:,.0f}</span> | 
-                            <span style="color: #1565C0;">Total PO: {total_po:,.0f}</span> | 
-                            <span style="color: {'#F44336' if selisih_qty < 0 else '#2E7D32'}; font-weight: 700;">Selisih: {selisih_qty:+,.0f} ({selisih_persen:+.1f}%)</span>
-                        </div>
+                    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(244, 67, 54, 0.3); font-size: 14px; color: #666;">
+                        <strong>Total UNDER Forecast SKUs: {len(under_skus_df)}</strong> | 
+                        <span style="color: #F44336;">Avg PO/Rofo: {avg_ratio:.1f}%</span> | 
+                        <span style="color: #2E7D32;">Rofo: {total_forecast:,.0f}</span> | 
+                        <span style="color: #1565C0;">PO: {total_po:,.0f}</span> | 
+                        <span style="color: {'#F44336' if selisih_qty < 0 else '#2E7D32'}; font-weight: bold;">Selisih: {selisih_qty:+,.0f} ({selisih_persen:+.1f}%)</span>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -1468,61 +1450,45 @@ if monthly_performance:
                 selisih_persen = (selisih_qty / total_forecast * 100) if total_forecast > 0 else 0
                 
                 # TAMBAH: HTML dengan highlight (WARNA BEDA untuk OVER)
-                st.markdown(f"""
-                <div style="background: linear-gradient(135deg, #FFF3E0 0%, #FFE0B2 100%); border-left: 5px solid #FF9800; border-radius: 10px; padding: 20px; margin: 20px 0; box-shadow: 0 4px 15px rgba(255, 152, 0, 0.2);">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <div>
-                            <div style="font-weight: 900; font-size: 18px; color: #EF6C00;">📈 OVER FORECAST SUMMARY</div>
-                            <div style="font-size: 13px; color: #F57C00;">Bulan: {last_month_name}</div>
+                                # Untuk Over Forecast
+                html_content_over = f"""
+                <div style="background: #FFF3E0; border-left: 5px solid #FF9800; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                    <h4 style="color: #EF6C00; margin-top: 0;">📈 OVER FORECAST SUMMARY - {last_month_name}</h4>
+                    
+                    <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                        <div style="flex: 1; min-width: 150px; background: white; padding: 15px; border-radius: 8px; text-align: center;">
+                            <div style="font-size: 24px; color: #FF9800; font-weight: bold;">{avg_ratio:.1f}%</div>
+                            <div style="font-size: 12px; color: #666;">Avg PO/Rofo</div>
                         </div>
-                        <div style="background: #FFF; padding: 5px 15px; border-radius: 20px; font-weight: bold; color: #FF9800; border: 2px solid #FF9800;">
-                            {len(over_skus_df)} SKUs
+                        
+                        <div style="flex: 1; min-width: 150px; background: white; padding: 15px; border-radius: 8px; text-align: center;">
+                            <div style="font-size: 22px; color: #2E7D32; font-weight: bold;">{total_forecast:,.0f}</div>
+                            <div style="font-size: 12px; color: #666;">Total Rofo</div>
+                        </div>
+                        
+                        <div style="flex: 1; min-width: 150px; background: white; padding: 15px; border-radius: 8px; text-align: center;">
+                            <div style="font-size: 22px; color: #1565C0; font-weight: bold;">{total_po:,.0f}</div>
+                            <div style="font-size: 12px; color: #666;">Total PO</div>
+                        </div>
+                        
+                        <div style="flex: 1; min-width: 150px; background: white; padding: 15px; border-radius: 8px; text-align: center;">
+                            <div style="font-size: 24px; color: {'#F44336' if selisih_qty < 0 else '#2E7D32'}; font-weight: bold;">{selisih_qty:+,.0f}</div>
+                            <div style="font-size: 12px; color: #666;">Selisih</div>
+                            <div style="font-size: 11px; color: {'#F44336' if selisih_qty < 0 else '#2E7D32'};">({selisih_persen:+.1f}%)</div>
                         </div>
                     </div>
                     
-                    <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px;">
-                        <div style="background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 3px 10px rgba(0,0,0,0.08);">
-                            <div style="font-size: 24px; font-weight: 900; color: #FF9800; margin-bottom: 5px;">{avg_ratio:.1f}%</div>
-                            <div style="font-size: 12px; color: #666; font-weight: 600;">Avg PO/Rofo Ratio</div>
-                            <div style="font-size: 11px; color: #999;">Target: 80-120%</div>
-                        </div>
-                        
-                        <div style="background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 3px 10px rgba(0,0,0,0.08);">
-                            <div style="font-size: 22px; font-weight: 900; color: #2E7D32; margin-bottom: 5px;">{total_forecast:,.0f}</div>
-                            <div style="font-size: 12px; color: #666; font-weight: 600;">Total Rofo Qty</div>
-                            <div style="font-size: 11px; color: #999;">Forecast Quantity</div>
-                        </div>
-                        
-                        <div style="background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 3px 10px rgba(0,0,0,0.08);">
-                            <div style="font-size: 22px; font-weight: 900; color: #1565C0; margin-bottom: 5px;">{total_po:,.0f}</div>
-                            <div style="font-size: 12px; color: #666; font-weight: 600;">Total PO Qty</div>
-                            <div style="font-size: 11px; color: #999;">Purchase Order</div>
-                        </div>
-                        
-                        <div style="background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 3px 10px rgba(0,0,0,0.08);">
-                            <div style="font-size: 24px; font-weight: 900; color: {'#F44336' if selisih_qty < 0 else '#2E7D32'}; margin-bottom: 5px;">{selisih_qty:+,.0f}</div>
-                            <div style="font-size: 12px; color: #666; font-weight: 600;">Selisih Qty</div>
-                            <div style="font-size: 11px; color: {'#F44336' if selisih_qty < 0 else '#2E7D32'}; font-weight: 600;">({selisih_persen:+.1f}%)</div>
-                        </div>
-                        
-                        <div style="background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 3px 10px rgba(0,0,0,0.08);">
-                            <div style="font-size: 22px; font-weight: 900; color: #FF9800; margin-bottom: 5px;">{(total_po/total_forecast*100 if total_forecast > 0 else 0):.1f}%</div>
-                            <div style="font-size: 12px; color: #666; font-weight: 600;">PO/Rofo %</div>
-                            <div style="font-size: 11px; color: #999;">Overall Ratio</div>
-                        </div>
-                    </div>
-                    
-                    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed rgba(255, 152, 0, 0.3);">
-                        <div style="font-size: 13px; color: #666; text-align: center;">
-                            <span style="font-weight: 600;">Total OVER Forecast SKUs: {len(over_skus_df)}</span> | 
-                            <span style="color: #FF9800;">Average PO/Rofo Ratio: {avg_ratio:.1f}%</span> | 
-                            <span style="color: #2E7D32;">Total Forecast: {total_forecast:,.0f}</span> | 
-                            <span style="color: #1565C0;">Total PO: {total_po:,.0f}</span> | 
-                            <span style="color: {'#F44336' if selisih_qty < 0 else '#2E7D32'}; font-weight: 700;">Selisih: {selisih_qty:+,.0f} ({selisih_persen:+.1f}%)</span>
-                        </div>
+                    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255, 152, 0, 0.3); font-size: 14px; color: #666;">
+                        <strong>Total OVER Forecast SKUs: {len(over_skus_df)}</strong> | 
+                        <span style="color: #FF9800;">Avg PO/Rofo: {avg_ratio:.1f}%</span> | 
+                        <span style="color: #2E7D32;">Rofo: {total_forecast:,.0f}</span> | 
+                        <span style="color: #1565C0;">PO: {total_po:,.0f}</span> | 
+                        <span style="color: {'#F44336' if selisih_qty < 0 else '#2E7D32'}; font-weight: bold;">Selisih: {selisih_qty:+,.0f} ({selisih_persen:+.1f}%)</span>
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
+                """
+                
+                st.markdown(html_content_over, unsafe_allow_html=True)
             else:
                 st.success(f"✅ No SKUs with OVER forecast in {last_month_name}")
 
