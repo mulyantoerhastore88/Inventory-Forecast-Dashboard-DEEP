@@ -620,7 +620,7 @@ def calculate_inventory_metrics_with_3month_avg(df_stock, df_sales, df_product):
         return metrics
 
 def calculate_sales_vs_forecast_po(df_sales, df_forecast, df_po, df_product):
-    """Calculate sales vs forecast and PO comparison"""
+    """Calculate sales vs forecast and PO comparison - HANYA ACTIVE SKUS"""
     
     results = {}
     
@@ -632,6 +632,16 @@ def calculate_sales_vs_forecast_po(df_sales, df_forecast, df_po, df_product):
         df_sales = add_product_info_to_data(df_sales, df_product)
         df_forecast = add_product_info_to_data(df_forecast, df_product)
         df_po = add_product_info_to_data(df_po, df_product)
+        
+        # FILTER HANYA ACTIVE SKUS - TAMBAH INI
+        if 'Status' in df_product.columns:
+            active_skus = df_product[df_product['Status'].str.upper() == 'ACTIVE']['SKU_ID'].tolist()
+            
+            # Filter semua dataset untuk hanya active SKUs
+            df_sales = df_sales[df_sales['SKU_ID'].isin(active_skus)]
+            df_forecast = df_forecast[df_forecast['SKU_ID'].isin(active_skus)]
+            if not df_po.empty:
+                df_po = df_po[df_po['SKU_ID'].isin(active_skus)]
         
         # Get last 3 months for comparison
         sales_months = sorted(df_sales['Month'].unique())
@@ -652,12 +662,15 @@ def calculate_sales_vs_forecast_po(df_sales, df_forecast, df_po, df_product):
         df_forecast_month = df_forecast[df_forecast['Month'] == last_month].copy()
         df_po_month = df_po[df_po['Month'] == last_month].copy()
         
+        # Filter hanya SKU dengan Forecast_Qty > 0 - TAMBAH INI JUGA
+        df_forecast_month = df_forecast_month[df_forecast_month['Forecast_Qty'] > 0]
+        
         # Merge all data
         df_merged = pd.merge(
             df_sales_month[['SKU_ID', 'Sales_Qty']],
             df_forecast_month[['SKU_ID', 'Forecast_Qty']],
             on='SKU_ID',
-            how='inner'
+            how='inner'  # Hanya SKU yang ada di kedua dataset
         )
         
         df_merged = pd.merge(
@@ -669,6 +682,9 @@ def calculate_sales_vs_forecast_po(df_sales, df_forecast, df_po, df_product):
         
         # Add product info
         df_merged = add_product_info_to_data(df_merged, df_product)
+        
+        # Filter out SKU dengan PO_Qty = 0 (tidak ada PO) jika mau
+        # df_merged = df_merged[df_merged['PO_Qty'] > 0]
         
         # Calculate ratios
         df_merged['Sales_vs_Forecast_Ratio'] = np.where(
@@ -687,7 +703,7 @@ def calculate_sales_vs_forecast_po(df_sales, df_forecast, df_po, df_product):
         df_merged['Forecast_Deviation'] = abs(df_merged['Sales_vs_Forecast_Ratio'] - 100)
         df_merged['PO_Deviation'] = abs(df_merged['Sales_vs_PO_Ratio'] - 100)
         
-        # Identify SKUs with high deviation (> 30%)
+        # Identify SKUs with high deviation (> 30%) - HANYA ACTIVE SKUS
         high_deviation_skus = df_merged[
             (df_merged['Forecast_Deviation'] > 30) | 
             (df_merged['PO_Deviation'] > 30)
@@ -705,7 +721,8 @@ def calculate_sales_vs_forecast_po(df_sales, df_forecast, df_po, df_product):
             'high_deviation_skus': high_deviation_skus,
             'avg_forecast_deviation': avg_forecast_deviation,
             'avg_po_deviation': avg_po_deviation,
-            'total_skus_compared': len(df_merged)
+            'total_skus_compared': len(df_merged),
+            'active_skus_only': True  # TAMBAH FLAG INI
         }
         
         return results
@@ -2180,6 +2197,12 @@ with tab5:
         st.divider()
         st.subheader("⚠️ High Deviation Analysis")
         
+        # TAMBAH NOTE INI
+        st.info("""
+        **📌 Note:** Analysis ini hanya mencakup **ACTIVE SKUs** dengan **Forecast > 0**. 
+        SKU Inactive/Discontinued tidak dihitung karena tidak ada forecast requirement.
+        """)
+        
         # Metrics
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -2197,7 +2220,8 @@ with tab5:
         with col3:
             st.metric(
                 "High Deviation SKUs",
-                len(sales_vs_forecast['high_deviation_skus'])
+                len(sales_vs_forecast['high_deviation_skus']),
+                delta=f"Active SKUs: {sales_vs_forecast['total_skus_compared']}"
             )
         
         high_dev_df = sales_vs_forecast['high_deviation_skus']
