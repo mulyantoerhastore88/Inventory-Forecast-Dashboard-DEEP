@@ -1175,7 +1175,7 @@ if monthly_performance:
         last_month_data = monthly_performance[last_month]
         last_month_name = last_month.strftime('%b %Y')
         
-                # Create tabs for Under and Over SKUs
+        # Create tabs for Under and Over SKUs
         eval_tab1, eval_tab2 = st.tabs([f"📉 UNDER Forecast ({last_month_name})", f"📈 OVER Forecast ({last_month_name})"])
         
         with eval_tab1:
@@ -1286,7 +1286,7 @@ if monthly_performance:
                     height=500
                 )
                 
-                                # Summary dengan HIGHLIGHT
+                # Summary dengan HIGHLIGHT
                 total_forecast = under_skus_df['Forecast_Qty'].sum()
                 total_po = under_skus_df['PO_Qty'].sum()
                 avg_ratio = under_skus_df['PO_Rofo_Ratio'].mean()
@@ -1341,10 +1341,120 @@ if monthly_performance:
                 </div>
                 """
                 
-                # Tampilkan dengan st.html() - metode terbaru
+                # Tampilkan dengan st.html()
                 st.html(html_content)
+            else:
+                st.success(f"✅ No SKUs with UNDER forecast in {last_month_name}")
+        
+        with eval_tab2:
+            over_skus_df = last_month_data['over_skus']
+            if not over_skus_df.empty:
+                # Add inventory data
+                if 'inventory_df' in inventory_metrics:
+                    inventory_data = inventory_metrics['inventory_df'][['SKU_ID', 'Stock_Qty', 'Avg_Monthly_Sales_3M', 'Cover_Months']]
+                    over_skus_df = pd.merge(over_skus_df, inventory_data, on='SKU_ID', how='left')
                 
-                                # Summary dengan HIGHLIGHT
+                # TAMBAH: Get last 3 months sales data
+                sales_cols_last_3 = []
+                if not df_sales.empty:
+                    # Get last 3 months from sales data
+                    sales_months = sorted(df_sales['Month'].unique())
+                    if len(sales_months) >= 3:
+                        last_3_sales_months = sales_months[-3:]
+                        
+                        # Create pivot for last 3 months sales
+                        try:
+                            sales_pivot = df_sales[df_sales['Month'].isin(last_3_sales_months)].pivot_table(
+                                index='SKU_ID',
+                                columns='Month',
+                                values='Sales_Qty',
+                                aggfunc='sum',
+                                fill_value=0
+                            ).reset_index()
+                            
+                            # Rename columns to month names
+                            month_rename = {}
+                            for col in sales_pivot.columns:
+                                if isinstance(col, datetime):
+                                    month_rename[col] = col.strftime('%b-%Y')
+                            sales_pivot = sales_pivot.rename(columns=month_rename)
+                            
+                            # Merge with over_skus_df
+                            over_skus_df = pd.merge(
+                                over_skus_df,
+                                sales_pivot,
+                                on='SKU_ID',
+                                how='left'
+                            )
+                            
+                            # Get the sales column names
+                            sales_cols_last_3 = [col for col in sales_pivot.columns if isinstance(col, str) and '-' in col]
+                            sales_cols_last_3 = sorted(sales_cols_last_3[-3:])  # Get last 3 months
+                            
+                        except Exception as e:
+                            st.warning(f"Tidak bisa menambahkan data sales 3 bulan terakhir: {str(e)}")
+                
+                # Prepare display columns - TAMBAH sales columns
+                display_cols = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier', 'Accuracy_Status',
+                              'Forecast_Qty', 'PO_Qty', 'PO_Rofo_Ratio', 
+                              'Stock_Qty', 'Avg_Monthly_Sales_3M', 'Cover_Months']
+                
+                # Tambah sales columns jika ada
+                display_cols.extend(sales_cols_last_3)
+                
+                # Filter available columns
+                available_cols = [col for col in display_cols if col in over_skus_df.columns]
+                
+                # Pastikan Product_Name selalu ada
+                if 'Product_Name' not in available_cols and 'Product_Name' in over_skus_df.columns:
+                    available_cols.insert(1, 'Product_Name')
+                
+                # Format the dataframe
+                display_df = over_skus_df[available_cols].copy()
+                
+                # Add formatted columns
+                if 'PO_Rofo_Ratio' in display_df.columns:
+                    display_df['PO_Rofo_Ratio'] = display_df['PO_Rofo_Ratio'].apply(lambda x: f"{x:.1f}%")
+                
+                if 'Cover_Months' in display_df.columns:
+                    display_df['Cover_Months'] = display_df['Cover_Months'].apply(lambda x: f"{x:.1f}" if x < 999 else "N/A")
+                
+                if 'Avg_Monthly_Sales_3M' in display_df.columns:
+                    display_df['Avg_Monthly_Sales_3M'] = display_df['Avg_Monthly_Sales_3M'].apply(lambda x: f"{x:.0f}")
+                
+                # Format sales columns
+                for col in sales_cols_last_3:
+                    if col in display_df.columns:
+                        display_df[col] = display_df[col].apply(lambda x: f"{x:.0f}" if pd.notnull(x) else "0")
+                
+                # Rename columns for display
+                column_names = {
+                    'SKU_ID': 'SKU ID',
+                    'Product_Name': 'Product Name',
+                    'Brand': 'Brand',
+                    'SKU_Tier': 'Tier',
+                    'Accuracy_Status': 'Status',
+                    'Forecast_Qty': 'Forecast Qty',
+                    'PO_Qty': 'PO Qty',
+                    'PO_Rofo_Ratio': 'PO/Rofo %',
+                    'Stock_Qty': 'Stock Available',
+                    'Avg_Monthly_Sales_3M': 'Avg Sales (3M)',
+                    'Cover_Months': 'Cover (Months)'
+                }
+                
+                # Add sales columns to rename dict
+                for col in sales_cols_last_3:
+                    column_names[col] = col
+                
+                display_df = display_df.rename(columns=column_names)
+                
+                st.dataframe(
+                    display_df,
+                    use_container_width=True,
+                    height=500
+                )
+                
+                # Summary dengan HIGHLIGHT
                 total_forecast = over_skus_df['Forecast_Qty'].sum()
                 total_po = over_skus_df['PO_Qty'].sum()
                 avg_ratio = over_skus_df['PO_Rofo_Ratio'].mean()
