@@ -1818,19 +1818,19 @@ for col in display_df.columns:
 
 display_df = display_df.rename(columns=column_names)
 
-# Sort by status and cover months
-if 'Cover (Months)' in display_df.columns and 'Status' in display_df.columns:
-    # Convert back to numeric for sorting
-    display_df['Cover_Numeric'] = pd.to_numeric(display_df['Cover (Months)'].replace('N/A', np.nan), errors='coerce')
-    display_df = display_df.sort_values(['Status', 'Cover_Numeric'], 
-                                       ascending=[True, False if 'High' in status_filter else True])
-    display_df = display_df.drop('Cover_Numeric', axis=1)
+        # Sort by status and cover months
+        if 'Cover (Months)' in display_df.columns and 'Status' in display_df.columns:
+            # Convert back to numeric for sorting
+            display_df['Cover_Numeric'] = pd.to_numeric(display_df['Cover (Months)'].replace('N/A', np.nan), errors='coerce')
+            display_df = display_df.sort_values(['Status', 'Cover_Numeric'], 
+                                               ascending=[True, False if 'High' in status_filter else True])
+            display_df = display_df.drop('Cover_Numeric', axis=1)
 
-st.dataframe(
-    display_df,
-    use_container_width=True,
-    height=500
-)
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            height=500
+        )
         
         # Summary statistics
         st.caption(f"**Showing {len(filtered_df)} of {len(inv_df)} SKUs** | **Average Cover:** {inv_df[inv_df['Cover_Months'] < 999]['Cover_Months'].mean():.1f} months")
