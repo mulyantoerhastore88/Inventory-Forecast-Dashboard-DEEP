@@ -3106,11 +3106,11 @@ with tab7:
     st.subheader("🔮 Forecast Generator - 12 Month Projection")
     st.markdown("**Generate Rofo forecast for active SKUs using:**")
     st.markdown("• **Baseline**: Average Sales (Last 3 Months)")
-    st.markdown("• **Growth Factor**: Brand-specific Month-over-Month growth")
+    st.markdown("• **Growth Factor**: Actual Month-over-Month growth from previous year")
     
     # ================ FUNGSI UNTUK GENERATE FORECAST ================
-    def calculate_brand_growth_factors(df_sales, df_product):
-        """Calculate month-over-month growth factors by brand"""
+    def calculate_monthly_growth_factors(df_sales, df_product):
+        """Calculate month-over-month growth factors by brand for each month"""
         
         if df_sales.empty or df_product.empty:
             return {}
@@ -3130,34 +3130,39 @@ with tab7:
             # Sort by brand and month
             brand_monthly_sales = brand_monthly_sales.sort_values(['Brand', 'Month'])
             
-            # Calculate month-over-month growth
-            growth_factors = {}
+            # Calculate month-over-month growth for each month transition
+            growth_factors = {}  # Format: {brand: {month_transition: growth_factor}}
             
             for brand in brand_monthly_sales['Brand'].unique():
                 brand_data = brand_monthly_sales[brand_monthly_sales['Brand'] == brand].sort_values('Month')
                 
                 if len(brand_data) < 2:
-                    growth_factors[brand] = 1.0  # No growth data, use neutral factor
+                    # Not enough data for growth calculation
+                    growth_factors[brand] = {'default': 1.0}
                     continue
                 
-                # Calculate growth for each month pair
-                monthly_growth = []
+                monthly_growth = {}
+                
                 for i in range(1, len(brand_data)):
+                    prev_month = brand_data.iloc[i-1]['Month']
+                    curr_month = brand_data.iloc[i]['Month']
+                    
+                    # Only consider same year transitions or year-to-year
                     prev_month_sales = brand_data.iloc[i-1]['Sales_Qty']
                     curr_month_sales = brand_data.iloc[i]['Sales_Qty']
                     
                     if prev_month_sales > 0:
                         growth = curr_month_sales / prev_month_sales
-                        monthly_growth.append(growth)
+                        
+                        # Create month transition key (e.g., "Dec-Jan", "Jan-Feb")
+                        month_transition = f"{prev_month.strftime('%b')}-{curr_month.strftime('%b')}"
+                        monthly_growth[month_transition] = growth
                 
-                # Calculate average growth factor for this brand
+                # Calculate average for each month transition
                 if monthly_growth:
-                    avg_growth = np.mean(monthly_growth)
-                    # Cap growth to reasonable range (0.5 to 2.0)
-                    avg_growth = max(0.5, min(2.0, avg_growth))
-                    growth_factors[brand] = avg_growth
+                    growth_factors[brand] = monthly_growth
                 else:
-                    growth_factors[brand] = 1.0
+                    growth_factors[brand] = {'default': 1.0}
             
             return growth_factors
             
@@ -3166,7 +3171,7 @@ with tab7:
             return {}
     
     def generate_12month_forecast(df_sales, df_product, start_month=None):
-        """Generate 12-month forecast for active SKUs"""
+        """Generate 12-month forecast for active SKUs using actual month-to-month growth"""
         
         if df_sales.empty or df_product.empty:
             return pd.DataFrame()
@@ -3190,8 +3195,8 @@ with tab7:
                 # Start from next month
                 start_month = last_sales_month + relativedelta(months=1)
             
-            # Calculate brand growth factors
-            growth_factors = calculate_brand_growth_factors(df_sales_active, df_product)
+            # Calculate brand growth factors (month-to-month)
+            growth_factors = calculate_monthly_growth_factors(df_sales_active, df_product)
             
             # Get last 3 months sales for each SKU
             sales_months = sorted(df_sales_active['Month'].unique())
@@ -3215,6 +3220,22 @@ with tab7:
             
             sku_avg_sales.columns = ['SKU_ID', 'Avg_Monthly_Sales', 'Brand', 'Product_Name', 'SKU_Tier']
             
+            # Apply seasonal adjustment factors
+            monthly_adjustments = {
+                1: 1.0,   # January
+                2: 0.9,   # February
+                3: 1.0,   # March
+                4: 1.0,   # April
+                5: 1.0,   # May
+                6: 1.0,   # June
+                7: 1.0,   # July
+                8: 1.0,   # August
+                9: 1.1,   # September
+                10: 1.1,  # October
+                11: 1.2,  # November (higher for holiday season)
+                12: 1.3   # December (holiday season)
+            }
+            
             # Generate forecast for next 12 months
             forecast_data = []
             
@@ -3225,32 +3246,27 @@ with tab7:
                 product_name = sku_row['Product_Name']
                 sku_tier = sku_row['SKU_Tier']
                 
-                # Get growth factor for this brand (default to 1.0 if not found)
-                growth_factor = growth_factors.get(brand, 1.0)
+                # Get growth factors for this brand
+                brand_growth_factors = growth_factors.get(brand, {'default': 1.0})
                 
-                # Apply seasonal adjustment factors (simple version)
-                # You can customize this based on your business seasonality
-                monthly_adjustments = {
-                    1: 1.0,   # January
-                    2: 0.9,   # February
-                    3: 1.0,   # March
-                    4: 1.0,   # April
-                    5: 1.0,   # May
-                    6: 1.0,   # June
-                    7: 1.0,   # July
-                    8: 1.0,   # August
-                    9: 1.1,   # September
-                    10: 1.1,  # October
-                    11: 1.2,  # November (higher for holiday season)
-                    12: 1.3   # December (holiday season)
-                }
-                
-                # Generate forecast for each month
+                # Generate forecast for each month with month-to-month growth
                 current_month = start_month
+                previous_month_forecast = baseline_sales  # Start with baseline
                 
                 for month_num in range(1, 13):
-                    # Calculate forecast with growth factor
-                    monthly_forecast = baseline_sales * (growth_factor ** month_num)
+                    # Apply month-to-month growth factor
+                    if month_num == 1:
+                        # For first forecast month, apply growth from same month transition from previous year
+                        month_transition = f"{(current_month - relativedelta(months=1)).strftime('%b')}-{current_month.strftime('%b')}"
+                        growth_factor = brand_growth_factors.get(month_transition, 
+                                                               brand_growth_factors.get('default', 1.0))
+                        monthly_forecast = baseline_sales * growth_factor
+                    else:
+                        # For subsequent months, use actual month-to-month growth from previous year
+                        month_transition = f"{(current_month - relativedelta(months=1)).strftime('%b')}-{current_month.strftime('%b')}"
+                        growth_factor = brand_growth_factors.get(month_transition, 
+                                                               brand_growth_factors.get('default', 1.0))
+                        monthly_forecast = previous_month_forecast * growth_factor
                     
                     # Apply seasonal adjustment
                     month_key = current_month.month
@@ -3272,11 +3288,12 @@ with tab7:
                         'Month_Label': current_month.strftime('%b-%Y'),
                         'Forecast_Qty': monthly_forecast,
                         'Baseline_Avg_Sales': baseline_sales,
-                        'Brand_Growth_Factor': growth_factor,
+                        'Growth_Factor_Applied': growth_factor,
                         'Seasonal_Factor': seasonal_factor
                     })
                     
-                    # Move to next month
+                    # Update for next iteration
+                    previous_month_forecast = monthly_forecast
                     current_month = current_month + relativedelta(months=1)
             
             forecast_df = pd.DataFrame(forecast_data)
@@ -3330,7 +3347,7 @@ with tab7:
     col_gen1, col_gen2 = st.columns(2)
     
     with col_gen1:
-        # Start month selection (Month Selector - PILIHAN KE-2)
+        # Start month selection (Month Selector)
         if not df_sales.empty:
             last_sales_month = df_sales['Month'].max()
             
@@ -3363,22 +3380,53 @@ with tab7:
             st.info("No sales data available. Using current month as start.")
     
     with col_gen2:
-        # Growth factor adjustment
-        st.markdown("#### ⚙️ Growth Settings")
+        # Adjustment settings
+        st.markdown("#### ⚙️ Forecast Settings")
+        
         apply_seasonality = st.checkbox("Apply Seasonal Adjustments", value=True)
-        min_forecast_qty = st.number_input("Minimum Forecast Quantity", min_value=0, value=1)
+        
+        # Special adjustments
+        adjustment_factor = st.slider(
+            "Overall Adjustment Factor", 
+            min_value=0.5, 
+            max_value=2.0, 
+            value=1.0,
+            step=0.1,
+            help="Multiply all forecasts by this factor"
+        )
+        
+        # Manual override for brands without growth data
+        default_growth = st.number_input(
+            "Default Growth for Missing Data",
+            min_value=0.0,
+            max_value=2.0,
+            value=1.0,
+            step=0.05,
+            help="Growth factor to use when brand has no historical growth data"
+        )
     
     # Generate forecast button
     if st.button("🚀 Generate 12-Month Forecast", type="primary", use_container_width=True):
-        with st.spinner("Calculating forecast..."):
+        with st.spinner("Calculating forecast with month-to-month growth factors..."):
             forecast_df = generate_12month_forecast(df_sales, df_product, start_month)
+            
+            # Apply adjustment factor if not 1.0
+            if not forecast_df.empty and adjustment_factor != 1.0:
+                forecast_df['Forecast_Qty'] = forecast_df['Forecast_Qty'] * adjustment_factor
+                forecast_df['Forecast_Qty'] = forecast_df['Forecast_Qty'].round().astype(int)
+                forecast_df['Forecast_Qty'] = forecast_df['Forecast_Qty'].apply(lambda x: max(1, x))
+                st.info(f"✅ Applied adjustment factor: {adjustment_factor}x")
             
             if not forecast_df.empty:
                 st.session_state['forecast_data'] = forecast_df
+                st.session_state['forecast_start_month'] = start_month
+                st.session_state['adjustment_factor'] = adjustment_factor
     
     # ================ DISPLAY FORECAST RESULTS ================
     if 'forecast_data' in st.session_state and not st.session_state['forecast_data'].empty:
         forecast_df = st.session_state['forecast_data']
+        start_month = st.session_state.get('forecast_start_month', start_month)
+        adjustment_factor = st.session_state.get('adjustment_factor', 1.0)
         
         st.divider()
         st.subheader("📊 Forecast Summary")
@@ -3401,40 +3449,254 @@ with tab7:
         with col_sum4:
             total_months = forecast_df['Forecast_Month'].nunique()
             st.metric("Forecast Period", f"{total_months} months")
+            
+            if adjustment_factor != 1.0:
+                st.caption(f"Adjustment: {adjustment_factor}x")
         
-        # ================ MONTHLY FORECAST TREND ================
+        # ================ MONTHLY FORECAST TREND WITH HISTORICAL & BRAND FILTER ================
         st.divider()
-        st.subheader("📈 Monthly Forecast Trend")
+        st.subheader("📈 Monthly Forecast Trend (vs Historical)")
         
-        # Aggregate by month
-        monthly_forecast = forecast_df.groupby(['Forecast_Month', 'Month_Label']).agg({
-            'Forecast_Qty': 'sum',
-            'SKU_ID': 'nunique'
+        # Filter controls in columns
+        col_filter_top1, col_filter_top2, col_filter_top3 = st.columns(3)
+        
+        with col_filter_top1:
+            # Brand filter for chart
+            all_brands = forecast_df['Brand'].unique()
+            selected_brands = st.multiselect(
+                "📊 Filter by Brand (Chart)",
+                options=all_brands,
+                default=all_brands[:min(5, len(all_brands))] if len(all_brands) > 0 else [],
+                help="Select brands to display in chart"
+            )
+        
+        with col_filter_top2:
+            # Show historical months selection
+            show_history = st.checkbox("📅 Show Historical Sales", value=True)
+            if show_history:
+                historical_months = st.slider(
+                    "Historical Months to Show",
+                    min_value=3,
+                    max_value=12,
+                    value=6,
+                    help="Number of historical months to display"
+                )
+        
+        with col_filter_top3:
+            # Chart type selection
+            chart_type = st.selectbox(
+                "📈 Chart Type",
+                options=["Line Chart", "Bar Chart", "Area Chart"],
+                index=0
+            )
+            
+            # Show growth markers
+            show_growth_markers = st.checkbox("📌 Show Growth Markers", value=True)
+        
+        # Prepare data for chart
+        if not df_sales.empty and show_history:
+            # Get historical sales data
+            sales_months = sorted(df_sales['Month'].unique())
+            
+            if historical_months > 0:
+                # Get last N historical months
+                last_n_months = sales_months[-historical_months:] if len(sales_months) >= historical_months else sales_months
+                
+                # Filter sales by selected brands if any
+                df_sales_filtered = df_sales.copy()
+                df_sales_filtered = add_product_info_to_data(df_sales_filtered, df_product)
+                
+                if selected_brands and len(selected_brands) > 0:
+                    df_sales_filtered = df_sales_filtered[df_sales_filtered['Brand'].isin(selected_brands)]
+                
+                # Aggregate historical sales
+                historical_sales = df_sales_filtered[df_sales_filtered['Month'].isin(last_n_months)]
+                historical_agg = historical_sales.groupby('Month').agg({
+                    'Sales_Qty': 'sum'
+                }).reset_index()
+                
+                historical_agg['Month_Label'] = historical_agg['Month'].apply(lambda x: x.strftime('%b-%Y'))
+                historical_agg = historical_agg.sort_values('Month')
+                historical_agg['Type'] = 'Historical Sales'
+                historical_agg['Quantity'] = historical_agg['Sales_Qty']
+            else:
+                historical_agg = pd.DataFrame(columns=['Month', 'Sales_Qty', 'Month_Label', 'Type', 'Quantity'])
+        else:
+            historical_agg = pd.DataFrame(columns=['Month', 'Sales_Qty', 'Month_Label', 'Type', 'Quantity'])
+        
+        # Prepare forecast data with brand filtering
+        if selected_brands and len(selected_brands) > 0:
+            forecast_filtered = forecast_df[forecast_df['Brand'].isin(selected_brands)]
+        else:
+            forecast_filtered = forecast_df
+        
+        forecast_agg = forecast_filtered.groupby(['Forecast_Month', 'Month_Label']).agg({
+            'Forecast_Qty': 'sum'
         }).reset_index()
         
-        monthly_forecast = monthly_forecast.sort_values('Forecast_Month')
+        forecast_agg = forecast_agg.rename(columns={'Forecast_Month': 'Month', 'Forecast_Qty': 'Quantity'})
+        forecast_agg['Type'] = 'Forecast'
         
-        # Create trend chart
-        fig_trend = go.Figure()
+        # Combine historical and forecast data
+        combined_data = []
         
-        fig_trend.add_trace(go.Bar(
-            x=monthly_forecast['Month_Label'],
-            y=monthly_forecast['Forecast_Qty'],
-            name='Total Forecast',
-            marker_color='#667eea',
-            hovertemplate='<b>%{x}</b><br>Forecast: %{y:,.0f}<br>SKUs: %{customdata[0]}<extra></extra>',
-            customdata=monthly_forecast[['SKU_ID']].values
-        ))
+        # Add historical data
+        if not historical_agg.empty:
+            for _, row in historical_agg.iterrows():
+                combined_data.append({
+                    'Month': row['Month'],
+                    'Month_Label': row['Month_Label'],
+                    'Quantity': row['Quantity'],
+                    'Type': row['Type']
+                })
         
-        fig_trend.update_layout(
-            height=400,
-            title='Total Forecast by Month',
-            xaxis_title='Month',
-            yaxis_title='Forecast Quantity',
-            hovermode='x unified'
-        )
+        # Add forecast data
+        for _, row in forecast_agg.iterrows():
+            combined_data.append({
+                'Month': row['Month'],
+                'Month_Label': row['Month_Label'],
+                'Quantity': row['Quantity'],
+                'Type': row['Type']
+            })
         
-        st.plotly_chart(fig_trend, use_container_width=True)
+        if combined_data:
+            combined_df = pd.DataFrame(combined_data)
+            combined_df = combined_df.sort_values('Month')
+            
+            # Create the chart
+            fig = go.Figure()
+            
+            # Historical Sales
+            hist_df = combined_df[combined_df['Type'] == 'Historical Sales']
+            if not hist_df.empty:
+                if chart_type == "Line Chart":
+                    fig.add_trace(go.Scatter(
+                        x=hist_df['Month_Label'],
+                        y=hist_df['Quantity'],
+                        name='Historical Sales',
+                        mode='lines+markers',
+                        line=dict(color='#4CAF50', width=3),
+                        marker=dict(size=8, color='#4CAF50'),
+                        hovertemplate='<b>%{x}</b><br>Sales: %{y:,.0f}<extra></extra>'
+                    ))
+                elif chart_type == "Bar Chart":
+                    fig.add_trace(go.Bar(
+                        x=hist_df['Month_Label'],
+                        y=hist_df['Quantity'],
+                        name='Historical Sales',
+                        marker_color='#4CAF50',
+                        opacity=0.7,
+                        hovertemplate='<b>%{x}</b><br>Sales: %{y:,.0f}<extra></extra>'
+                    ))
+                else:  # Area Chart
+                    fig.add_trace(go.Scatter(
+                        x=hist_df['Month_Label'],
+                        y=hist_df['Quantity'],
+                        name='Historical Sales',
+                        mode='lines',
+                        line=dict(color='#4CAF50', width=3),
+                        fill='tozeroy',
+                        fillcolor='rgba(76, 175, 80, 0.3)',
+                        hovertemplate='<b>%{x}</b><br>Sales: %{y:,.0f}<extra></extra>'
+                    ))
+            
+            # Forecast
+            forecast_chart_df = combined_df[combined_df['Type'] == 'Forecast']
+            if not forecast_chart_df.empty:
+                if chart_type == "Line Chart":
+                    fig.add_trace(go.Scatter(
+                        x=forecast_chart_df['Month_Label'],
+                        y=forecast_chart_df['Quantity'],
+                        name='Forecast',
+                        mode='lines+markers',
+                        line=dict(color='#667eea', width=3, dash='dash'),
+                        marker=dict(size=8, color='#667eea'),
+                        hovertemplate='<b>%{x}</b><br>Forecast: %{y:,.0f}<extra></extra>'
+                    ))
+                elif chart_type == "Bar Chart":
+                    fig.add_trace(go.Bar(
+                        x=forecast_chart_df['Month_Label'],
+                        y=forecast_chart_df['Quantity'],
+                        name='Forecast',
+                        marker_color='#667eea',
+                        opacity=0.7,
+                        hovertemplate='<b>%{x}</b><br>Forecast: %{y:,.0f}<extra></extra>'
+                    ))
+                else:  # Area Chart
+                    fig.add_trace(go.Scatter(
+                        x=forecast_chart_df['Month_Label'],
+                        y=forecast_chart_df['Quantity'],
+                        name='Forecast',
+                        mode='lines',
+                        line=dict(color='#667eea', width=3, dash='dash'),
+                        fill='tozeroy',
+                        fillcolor='rgba(102, 126, 234, 0.3)',
+                        hovertemplate='<b>%{x}</b><br>Forecast: %{y:,.0f}<extra></extra>'
+                    ))
+                
+                # Add growth markers if enabled
+                if show_growth_markers and len(forecast_chart_df) > 1:
+                    growth_values = []
+                    growth_labels = []
+                    
+                    for i in range(1, len(forecast_chart_df)):
+                        prev_qty = forecast_chart_df.iloc[i-1]['Quantity']
+                        curr_qty = forecast_chart_df.iloc[i]['Quantity']
+                        
+                        if prev_qty > 0:
+                            growth_pct = ((curr_qty - prev_qty) / prev_qty) * 100
+                            growth_values.append(growth_pct)
+                            growth_labels.append(f"{growth_pct:+.1f}%")
+                        else:
+                            growth_values.append(0)
+                            growth_labels.append("N/A")
+                    
+                    # Add growth markers as annotations
+                    for i in range(len(growth_values)):
+                        fig.add_annotation(
+                            x=forecast_chart_df.iloc[i]['Month_Label'],
+                            y=forecast_chart_df.iloc[i]['Quantity'],
+                            text=growth_labels[i],
+                            showarrow=True,
+                            arrowhead=2,
+                            arrowsize=1,
+                            arrowwidth=2,
+                            arrowcolor="#FF9800" if growth_values[i] >= 0 else "#FF5252",
+                            font=dict(color="#FF9800" if growth_values[i] >= 0 else "#FF5252", size=10),
+                            yshift=20
+                        )
+            
+            # Update layout
+            fig.update_layout(
+                height=500,
+                title=f'Forecast vs Historical Sales{" - " + ", ".join(selected_brands) if selected_brands else ""}',
+                xaxis_title='Month',
+                yaxis_title='Quantity',
+                hovermode='x unified',
+                plot_bgcolor='white',
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                )
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Chart summary
+            if not historical_agg.empty and not forecast_chart_df.empty:
+                avg_historical = historical_agg['Quantity'].mean()
+                avg_forecast = forecast_chart_df['Quantity'].mean()
+                growth_pct = ((avg_forecast - avg_historical) / avg_historical * 100) if avg_historical > 0 else 0
+                
+                st.caption(f"""
+                **📈 Summary:** 
+                Avg Historical ({historical_months}m): {avg_historical:,.0f} | 
+                Avg Forecast ({len(forecast_chart_df)}m): {avg_forecast:,.0f} | 
+                Projected Growth: **{growth_pct:+.1f}%**
+                """)
         
         # ================ FORECAST BY BRAND ================
         st.subheader("🏷️ Forecast by Brand")
@@ -3520,14 +3782,14 @@ with tab7:
         # Display data
         display_cols = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier', 
                        'Month_Label', 'Forecast_Qty', 'Baseline_Avg_Sales', 
-                       'Brand_Growth_Factor']
+                       'Growth_Factor_Applied']
         
         display_df = filtered_forecast[display_cols].copy()
         display_df = display_df.sort_values(['Brand', 'SKU_ID', 'Month_Label'])
         
         # Format columns
         display_df['Baseline_Avg_Sales'] = display_df['Baseline_Avg_Sales'].apply(lambda x: f"{x:,.0f}")
-        display_df['Brand_Growth_Factor'] = display_df['Brand_Growth_Factor'].apply(lambda x: f"{x:.2f}")
+        display_df['Growth_Factor_Applied'] = display_df['Growth_Factor_Applied'].apply(lambda x: f"{x:.3f}")
         
         st.dataframe(
             display_df,
@@ -3572,14 +3834,17 @@ with tab7:
             # Download summary report
             summary_data = {
                 'Metric': ['Total SKUs', 'Total Forecast Quantity', 'Forecast Period', 
-                          'Average per SKU', 'Number of Brands', 'Generated Date'],
+                          'Average per SKU', 'Number of Brands', 'Generated Date',
+                          'Adjustment Factor Applied', 'Start Month'],
                 'Value': [
                     total_skus,
                     f"{total_forecast:,.0f}",
                     f"{total_months} months",
                     f"{avg_per_sku:,.0f}",
                     forecast_df['Brand'].nunique(),
-                    datetime.now().strftime('%Y-%m-%d %H:%M')
+                    datetime.now().strftime('%Y-%m-%d %H:%M'),
+                    f"{adjustment_factor:.2f}x",
+                    start_month.strftime('%b %Y')
                 ]
             }
             
@@ -3665,7 +3930,7 @@ with tab7:
         
         **📊 Forecast Logic:**
         - **Baseline**: Average of last 3 months sales
-        - **Growth**: Brand-specific month-over-month growth rate
+        - **Growth**: Actual month-to-month growth from previous year
         - **Seasonality**: Adjustments based on month of year
         
         **⚠️ Note**: Only active SKUs with sales history will be included.
