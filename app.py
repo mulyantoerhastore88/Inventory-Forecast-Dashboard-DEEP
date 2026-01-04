@@ -3380,12 +3380,27 @@ with tab7:
             st.info("No sales data available. Using current month as start.")
     
     with col_gen2:
-        # Adjustment settings
         st.markdown("#### ⚙️ Forecast Settings")
-        
-        apply_seasonality = st.checkbox("Apply Seasonal Adjustments", value=True)
-        
-        # Special adjustments
+    
+        # Growth calculation method
+        growth_method = st.selectbox(
+            "Growth Calculation Method",
+            options=["Smart (Filter New SKU & Outliers)", "Simple (Brand Average)", "Conservative (Minimal Growth)"],
+            index=0,
+            help="Smart: Filters out new SKU effects and outliers. Simple: Uses raw brand averages. Conservative: Uses minimal growth."
+        )
+    
+        # Growth conservativeness
+        growth_conservativeness = st.slider(
+            "Growth Conservativeness",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.7,
+            step=0.1,
+            help="0.0 = Use calculated growth directly, 1.0 = Use no growth (1.0 factor)"
+        )
+    
+        # Adjustment factor
         adjustment_factor = st.slider(
             "Overall Adjustment Factor", 
             min_value=0.5, 
@@ -3393,16 +3408,6 @@ with tab7:
             value=1.0,
             step=0.1,
             help="Multiply all forecasts by this factor"
-        )
-        
-        # Manual override for brands without growth data
-        default_growth = st.number_input(
-            "Default Growth for Missing Data",
-            min_value=0.0,
-            max_value=2.0,
-            value=1.0,
-            step=0.05,
-            help="Growth factor to use when brand has no historical growth data"
         )
     
     # Generate forecast button
