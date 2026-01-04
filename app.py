@@ -1678,89 +1678,48 @@ with tab2:
         )
         
         # ================ GROUPED BAR CHART SECTION ================
-        st.divider()
-        st.subheader("📊 Brand Performance Comparison")
-        
-        # Get last month data untuk brand comparison
-        last_month = sorted(monthly_performance.keys())[-1] if monthly_performance else None
-        
-        if last_month:
-            # Get data untuk bulan terakhir
-            df_forecast_last = df_forecast[df_forecast['Month'] == last_month]
-            df_po_last = df_po[df_po['Month'] == last_month]
-            df_sales_last = df_sales[df_sales['Month'] == last_month]
-            
-            # Add product info
-            df_forecast_last = add_product_info_to_data(df_forecast_last, df_product)
-            df_po_last = add_product_info_to_data(df_po_last, df_product)
-            df_sales_last = add_product_info_to_data(df_sales_last, df_product)
-            
-            if 'Brand' in df_forecast_last.columns:
-                # Aggregate by brand
-                brand_comparison = []
-                brands = df_forecast_last['Brand'].unique()
-                
-                for brand in brands:
-                    rofo_qty = df_forecast_last[df_forecast_last['Brand'] == brand]['Forecast_Qty'].sum()
-                    po_qty = df_po_last[df_po_last['Brand'] == brand]['PO_Qty'].sum()
-                    sales_qty = df_sales_last[df_sales_last['Brand'] == brand]['Sales_Qty'].sum()
-                    
-                    # Calculate accuracy
-                    accuracy = 0
-                    if rofo_qty > 0:
-                        accuracy = 100 - abs((po_qty / rofo_qty * 100) - 100)
-                    
-                    brand_comparison.append({
-                        'Brand': brand,
-                        'Rofo': rofo_qty,
-                        'PO': po_qty,
-                        'Sales': sales_qty,
-                        'Accuracy': accuracy,
-                        'PO_Rofo_Ratio': (po_qty / rofo_qty * 100) if rofo_qty > 0 else 0
-                    })
-                
-                comparison_df = pd.DataFrame(brand_comparison)
-                comparison_df = comparison_df.sort_values('Rofo', ascending=False).head(15)  # Top 15 brands
-                
-                # Create grouped bar chart
-                fig = go.Figure()
-                
-                fig.add_trace(go.Bar(
-                    x=comparison_df['Brand'],
-                    y=comparison_df['Rofo'],
-                    name='Rofo',
-                    marker_color='#667eea',
-                    hovertemplate='<b>%{x}</b><br>Rofo: %{y:,.0f}<extra></extra>'
-                ))
-                
-                fig.add_trace(go.Bar(
-                    x=comparison_df['Brand'],
-                    y=comparison_df['PO'],
-                    name='PO',
-                    marker_color='#FF9800',
-                    hovertemplate='<b>%{x}</b><br>PO: %{y:,.0f}<extra></extra>'
-                ))
-                
-                fig.add_trace(go.Bar(
-                    x=comparison_df['Brand'],
-                    y=comparison_df['Sales'],
-                    name='Sales',
-                    marker_color='#4CAF50',
-                    hovertemplate='<b>%{x}</b><br>Sales: %{y:,.0f}<extra></extra>'
-                ))
-                
-                fig.update_layout(
-                    height=500,
-                    title=f'Top 15 Brands Performance - {last_month.strftime("%b %Y")}',
-                    xaxis_title='Brand',
-                    yaxis_title='Quantity',
-                    barmode='group',
-                    hovermode='x unified',
-                    plot_bgcolor='white',
-                    xaxis={'categoryorder': 'total descending'}
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
+st.divider()
+st.subheader("📊 Brand Performance Comparison (Horizontal)")
+
+if last_month and 'comparison_df' in locals() and not comparison_df.empty:
+    # Pivot data untuk horizontal bar
+    melted_df = comparison_df.melt(
+        id_vars=['Brand'], 
+        value_vars=['Rofo', 'PO', 'Sales'],
+        var_name='Metric', 
+        value_name='Quantity'
+    )
+    
+    # Buat horizontal grouped bar chart
+    fig = px.bar(
+        melted_df,
+        y='Brand',
+        x='Quantity',
+        color='Metric',
+        orientation='h',
+        barmode='group',
+        color_discrete_map={
+            'Rofo': '#667eea',
+            'PO': '#FF9800',
+            'Sales': '#4CAF50'
+        },
+        title=f'Brand Performance - {last_month.strftime("%b %Y")}',
+        labels={'Quantity': 'Quantity', 'Brand': 'Brand', 'Metric': 'Metric'}
+    )
+    
+    fig.update_layout(
+        height=max(300, len(comparison_df) * 40),  # Otomatis adjust height berdasarkan jumlah brand
+        yaxis={'categoryorder': 'total ascending'},
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
         
         # ================ ACCURACY VISUALIZATION SECTION ================
         st.divider()
