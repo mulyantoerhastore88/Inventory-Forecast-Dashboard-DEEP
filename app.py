@@ -3330,36 +3330,37 @@ with tab7:
     col_gen1, col_gen2 = st.columns(2)
     
     with col_gen1:
-    # Start month selection
-    if not df_sales.empty:
-        last_sales_month = df_sales['Month'].max()
-        default_start = last_sales_month + relativedelta(months=1)
+        # Start month selection (Month Selector - PILIHAN KE-2)
+        if not df_sales.empty:
+            last_sales_month = df_sales['Month'].max()
+            
+            # Buat list bulan yang available untuk forecast
+            available_months = []
+            current_month = last_sales_month + relativedelta(months=1)
+            
+            for i in range(24):  # 24 bulan ke depan
+                available_months.append(current_month)
+                current_month = current_month + relativedelta(months=1)
+            
+            # Format untuk display
+            month_options = [m.strftime('%b %Y') for m in available_months]
+            month_values = available_months
+            
+            selected_month_idx = st.selectbox(
+                "Start Forecast From:",
+                options=range(len(month_options)),
+                format_func=lambda x: month_options[x],
+                help="Select starting month for forecast"
+            )
+            
+            start_month = month_values[selected_month_idx]
+            
+            st.caption(f"Selected: {month_options[selected_month_idx]}")
         
-        # Tentukan range yang masuk akal
-        min_date = last_sales_month + relativedelta(months=1)  # Bulan berikutnya
-        max_date = last_sales_month + relativedelta(months=24)  # Max 2 tahun ke depan
-        
-        start_month_input = st.date_input(
-            "Start Forecast From:",
-            value=default_start,
-            min_value=min_date,
-            max_value=max_date,
-            help="First month for forecast projection"
-        )
-        start_month = datetime(start_month_input.year, start_month_input.month, 1)
-    else:
-        # Default jika tidak ada data sales
-        start_month = datetime.now().replace(day=1)
-        min_date = start_month
-        max_date = start_month + relativedelta(months=24)
-        
-        start_month_input = st.date_input(
-            "Start Forecast From:",
-            value=start_month,
-            min_value=min_date,
-            max_value=max_date
-        )
-        start_month = datetime(start_month_input.year, start_month_input.month, 1)
+        else:
+            # Default jika tidak ada data
+            start_month = datetime.now().replace(day=1)
+            st.info("No sales data available. Using current month as start.")
     
     with col_gen2:
         # Growth factor adjustment
