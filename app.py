@@ -3330,21 +3330,36 @@ with tab7:
     col_gen1, col_gen2 = st.columns(2)
     
     with col_gen1:
-        # Start month selection
-        if not df_sales.empty:
-            last_sales_month = df_sales['Month'].max()
-            default_start = last_sales_month + relativedelta(months=1)
-            start_month_input = st.date_input(
-                "Start Forecast From:",
-                value=default_start,
-                min_value=last_sales_month,
-                help="First month for forecast projection"
-            )
-            start_month = datetime(start_month_input.year, start_month_input.month, 1)
-        else:
-            start_month = datetime.now().replace(day=1)
-            start_month_input = st.date_input("Start Forecast From:", value=start_month)
-            start_month = datetime(start_month_input.year, start_month_input.month, 1)
+    # Start month selection
+    if not df_sales.empty:
+        last_sales_month = df_sales['Month'].max()
+        default_start = last_sales_month + relativedelta(months=1)
+        
+        # Tentukan range yang masuk akal
+        min_date = last_sales_month + relativedelta(months=1)  # Bulan berikutnya
+        max_date = last_sales_month + relativedelta(months=24)  # Max 2 tahun ke depan
+        
+        start_month_input = st.date_input(
+            "Start Forecast From:",
+            value=default_start,
+            min_value=min_date,
+            max_value=max_date,
+            help="First month for forecast projection"
+        )
+        start_month = datetime(start_month_input.year, start_month_input.month, 1)
+    else:
+        # Default jika tidak ada data sales
+        start_month = datetime.now().replace(day=1)
+        min_date = start_month
+        max_date = start_month + relativedelta(months=24)
+        
+        start_month_input = st.date_input(
+            "Start Forecast From:",
+            value=start_month,
+            min_value=min_date,
+            max_value=max_date
+        )
+        start_month = datetime(start_month_input.year, start_month_input.month, 1)
     
     with col_gen2:
         # Growth factor adjustment
@@ -3573,7 +3588,7 @@ with tab7:
             st.download_button(
                 label="📈 Download Summary Report",
                 data=summary_csv,
-                file_file=f"rofo_summary_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                file_name=f"rofo_summary_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                 mime="text/csv",
                 use_container_width=True
             )
