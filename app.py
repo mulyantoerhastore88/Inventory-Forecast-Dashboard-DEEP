@@ -2052,7 +2052,7 @@ with tab4:
                     stock_qty = sku_details.get('Stock_Qty', 0)
                     st.metric("Current Stock", f"{stock_qty:,.0f}")
                 
-                # SECTION 1: 12-MONTH PERFORMANCE TIMELINE
+                # SECTION 1: 12-MONTH PERFORMANCE TIMELINE - SIMPLE VERSION
                 st.markdown("#### 📈 12-Month Performance Timeline")
                 
                 # Prepare historical data for this SKU
@@ -2076,81 +2076,100 @@ with tab4:
                         po_qty = df_po[(df_po['Month'] == month) & 
                                      (df_po['SKU_ID'] == selected_sku)]['PO_Qty'].sum() if not df_po.empty else 0
                         
-                        # Calculate accuracy if forecast exists
-                        accuracy = 0
-                        if forecast_qty > 0 and po_qty > 0:
-                            accuracy = 100 - abs((po_qty / forecast_qty * 100) - 100)
-                        
                         historical_data.append({
                             'Month': month,
                             'Month_Display': month_name,
                             'Sales': sales_qty,
                             'Rofo': forecast_qty,
-                            'PO': po_qty,
-                            'Accuracy': accuracy
+                            'PO': po_qty
                         })
                 
                 if historical_data:
                     hist_df = pd.DataFrame(historical_data)
                     hist_df = hist_df.sort_values('Month')
                     
-                    # Create dual-axis chart
+                    # SIMPLE CHART - tanpa dual-axis dulu
                     fig_timeline = go.Figure()
                     
-                    # Quantity bars (left y-axis)
-                    fig_timeline.add_trace(go.Bar(
+                    # Quantity lines
+                    fig_timeline.add_trace(go.Scatter(
                         x=hist_df['Month_Display'],
                         y=hist_df['Rofo'],
                         name='Rofo',
-                        marker_color='#667eea',
-                        opacity=0.7
+                        mode='lines+markers',
+                        line=dict(color='#667eea', width=3),
+                        marker=dict(size=8, color='#667eea')
                     ))
                     
-                    fig_timeline.add_trace(go.Bar(
+                    fig_timeline.add_trace(go.Scatter(
                         x=hist_df['Month_Display'],
                         y=hist_df['PO'],
                         name='PO',
-                        marker_color='#FF9800',
-                        opacity=0.7
+                        mode='lines+markers',
+                        line=dict(color='#FF9800', width=3),
+                        marker=dict(size=8, color='#FF9800')
                     ))
                     
-                    fig_timeline.add_trace(go.Bar(
+                    fig_timeline.add_trace(go.Scatter(
                         x=hist_df['Month_Display'],
                         y=hist_df['Sales'],
                         name='Sales',
-                        marker_color='#4CAF50',
-                        opacity=0.7
-                    ))
-                    
-                    # Accuracy line (right y-axis)
-                    fig_timeline.add_trace(go.Scatter(
-                        x=hist_df['Month_Display'],
-                        y=hist_df['Accuracy'],
-                        name='Accuracy %',
-                        yaxis='y2',
                         mode='lines+markers',
-                        line=dict(color='#FF5252', width=3),
-                        marker=dict(size=8, color='#FF5252')
+                        line=dict(color='#4CAF50', width=3),
+                        marker=dict(size=8, color='#4CAF50')
                     ))
                     
+                    # SIMPLE LAYOUT
                     fig_timeline.update_layout(
-                        height=500,
-                        title=f'<b>12-Month Performance: {selected_sku} - {product_name}</b>',
-                        xaxis_title='<b>Month</b>',
-                        yaxis_title='<b>Quantity</b>',
-                        yaxis2=dict(
-                            title='<b>Accuracy %</b>',
-                            titlefont=dict(color='#FF5252'),
-                            tickfont=dict(color='#FF5252'),
-                            overlaying='y',
-                            side='right',
-                            range=[0, 110]
-                        ),
-                        barmode='group',
+                        height=400,
+                        title=f'SKU Performance: {selected_sku}',
+                        xaxis_title='Month',
+                        yaxis_title='Quantity',
                         plot_bgcolor='white'
                     )
                     
                     st.plotly_chart(fig_timeline, use_container_width=True)
+                    
+                    # Tambahkan accuracy chart terpisah
+                    if not df_forecast.empty and not df_po.empty:
+                        # Calculate accuracy per month
+                        accuracy_data = []
+                        for month in last_12_months:
+                            month_name = month.strftime('%b-%Y')
+                            forecast_qty = df_forecast[(df_forecast['Month'] == month) & 
+                                                     (df_forecast['SKU_ID'] == selected_sku)]['Forecast_Qty'].sum()
+                            po_qty = df_po[(df_po['Month'] == month) & 
+                                         (df_po['SKU_ID'] == selected_sku)]['PO_Qty'].sum()
+                            
+                            if forecast_qty > 0 and po_qty > 0:
+                                accuracy = 100 - abs((po_qty / forecast_qty * 100) - 100)
+                                accuracy_data.append({
+                                    'Month': month_name,
+                                    'Accuracy': accuracy
+                                })
+                        
+                        if accuracy_data:
+                            acc_df = pd.DataFrame(accuracy_data)
+                            
+                            fig_acc = go.Figure()
+                            fig_acc.add_trace(go.Scatter(
+                                x=acc_df['Month'],
+                                y=acc_df['Accuracy'],
+                                mode='lines+markers',
+                                name='Accuracy %',
+                                line=dict(color='#FF5252', width=3),
+                                marker=dict(size=8, color='#FF5252')
+                            ))
+                            
+                            fig_acc.update_layout(
+                                height=300,
+                                title='Forecast Accuracy Trend',
+                                xaxis_title='Month',
+                                yaxis_title='Accuracy %',
+                                yaxis_range=[0, 110]
+                            )
+                            
+                            st.plotly_chart(fig_acc, use_container_width=True)
                     
                     # SECTION 2: INVENTORY HEALTH
                     st.markdown("#### 📦 Inventory Health Analysis")
