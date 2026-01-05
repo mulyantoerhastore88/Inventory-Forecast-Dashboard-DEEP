@@ -5,3 +5,4 @@ altair
 plotly
 gspread
 google-auth
+tenacity
