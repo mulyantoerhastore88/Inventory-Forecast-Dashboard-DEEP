@@ -3101,510 +3101,263 @@ with tab6:
     else:
         st.warning("No data available for selected dataset")
 
-# --- TAB 7: FORECAST GENERATOR WITH MANUAL ADJUSTMENTS ---
+# --- TAB 7: ROFO VALIDATION DASHBOARD ---
 with tab7:
-    st.subheader("🔮 Smart Forecast Generator with Manual Adjustments")
+    st.subheader("🔍 Rofo Validation & Analysis Dashboard")
+    st.markdown("**Validate and analyze your Excel-calculated Rofo forecasts**")
     
-    # ================ CORE FORECAST FUNCTIONS ================
-    def calculate_smart_baseline(sku_sales, exclude_periods=None):
-        """Calculate baseline excluding specified periods"""
-        
-        if sku_sales.empty:
-            return 0
-        
-        if exclude_periods is None:
-            exclude_periods = []
-        
-        # Filter out excluded periods
-        valid_sales = sku_sales.copy()
-        for start_month, end_month in exclude_periods:
-            mask = (valid_sales['Month'] >= start_month) & (valid_sales['Month'] <= end_month)
-            valid_sales = valid_sales[~mask]
-        
-        if valid_sales.empty:
-            valid_sales = sku_sales.copy()
-        
-        # Use weighted average of last 6 months
-        if len(valid_sales) >= 6:
-            recent = valid_sales.tail(6).copy()
-            weights = [0.1, 0.1, 0.15, 0.15, 0.2, 0.3]
-            weights = weights[:len(recent)]
-            baseline = np.average(recent['Sales_Qty'].values, weights=weights)
-        elif len(valid_sales) >= 3:
-            baseline = valid_sales.tail(3)['Sales_Qty'].mean()
-        else:
-            baseline = valid_sales['Sales_Qty'].mean()
-        
-        return max(0, baseline)
-    
-    def generate_forecast_with_adjustments(df_sales, df_product, start_month, manual_adjustments):
-        """Generate forecast with manual monthly adjustments"""
-        
-        if df_sales.empty or df_product.empty:
-            return pd.DataFrame()
+    # ================ LOAD ROFO ONWARDS DATA ================
+    @st.cache_data(ttl=300)
+    def load_rofo_onwards_data(_client):
+        """Load Rofo_onwards data from Google Sheets"""
         
         try:
-            # Active SKUs only
-            active_skus = df_product[df_product['Status'].str.upper() == 'ACTIVE']['SKU_ID'].tolist()
-            df_sales_active = df_sales[df_sales['SKU_ID'].isin(active_skus)].copy()
+            gsheet_url = st.secrets["gsheet_url"]
+            ws = _client.open_by_url(gsheet_url).worksheet("Rofo_onwards")
+            df_rofo = pd.DataFrame(ws.get_all_records())
             
-            if df_sales_active.empty:
-                return pd.DataFrame()
+            # Clean column names
+            df_rofo.columns = [col.strip().replace(' ', '_') for col in df_rofo.columns]
             
-            df_sales_active = add_product_info_to_data(df_sales_active, df_product)
+            # Identify month columns (format like Jan-26, Feb-26, etc.)
+            month_cols = []
+            for col in df_rofo.columns:
+                if any(month in col.upper() for month in 
+                      ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
+                       'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']):
+                    month_cols.append(col)
             
-            # Default exclude periods (Mar-Jun 2025 strategy failure)
-            exclude_periods = [
-                (datetime(2025, 3, 1), datetime(2025, 6, 1))
-            ]
+            # Convert month columns to numeric
+            for col in month_cols:
+                df_rofo[col] = pd.to_numeric(df_rofo[col], errors='coerce').fillna(0)
             
-            forecast_data = []
+            # Add product info if not present
+            if 'Product_Name' not in df_rofo.columns and 'Product_Master' in locals():
+                df_rofo = add_product_info_to_data(df_rofo, df_product)
             
-            for sku_id in df_sales_active['SKU_ID'].unique():
-                sku_sales = df_sales_active[df_sales_active['SKU_ID'] == sku_id].sort_values('Month')
-                
-                if sku_sales.empty or len(sku_sales) < 3:
-                    continue
-                
-                # Get SKU info
-                brand = sku_sales.iloc[0].get('Brand', 'Unknown')
-                product_name = sku_sales.iloc[0].get('Product_Name', 'Unknown')
-                sku_tier = sku_sales.iloc[0].get('SKU_Tier', 'Unknown')
-                
-                # Calculate baseline
-                baseline = calculate_smart_baseline(sku_sales, exclude_periods)
-                
-                if baseline <= 0:
-                    continue
-                
-                # Generate forecast
-                current_baseline = baseline
-                current_month = start_month
-                
-                for month_num in range(1, 13):
-                    forecast_month = current_month
-                    month_key = (forecast_month.year, forecast_month.month)
-                    
-                    # Get same month last year
-                    same_month_last_year = forecast_month - relativedelta(years=1)
-                    last_year_sales = sku_sales[sku_sales['Month'] == same_month_last_year]
-                    
-                    if not last_year_sales.empty:
-                        last_year_qty = last_year_sales['Sales_Qty'].iloc[0]
-                    else:
-                        same_month_data = sku_sales[sku_sales['Month'].dt.month == forecast_month.month]
-                        last_year_qty = same_month_data['Sales_Qty'].mean() if not same_month_data.empty else current_baseline
-                    
-                    # Calculate YoY growth
-                    if last_year_qty > 0:
-                        raw_growth = last_year_qty / current_baseline
-                    else:
-                        raw_growth = 1.0
-                    
-                    # Apply manual adjustment if exists
-                    manual_adj = manual_adjustments.get(month_key, 1.0)
-                    
-                    # Calculate final forecast
-                    forecast_qty = current_baseline * raw_growth * manual_adj
-                    forecast_qty = round(max(1, forecast_qty))
-                    
-                    forecast_data.append({
-                        'SKU_ID': sku_id,
-                        'Product_Name': product_name,
-                        'Brand': brand,
-                        'SKU_Tier': sku_tier,
-                        'Forecast_Month': forecast_month,
-                        'Month_Label': forecast_month.strftime('%b-%Y'),
-                        'Year': forecast_month.year,
-                        'Month_Num': forecast_month.month,
-                        'Forecast_Qty': forecast_qty,
-                        'Baseline': current_baseline,
-                        'YoY_Growth': raw_growth,
-                        'Manual_Adjustment': manual_adj,
-                        'Final_Growth': raw_growth * manual_adj
-                    })
-                    
-                    # Update baseline (70% forecast, 30% previous baseline)
-                    current_baseline = (current_baseline * 0.3) + (forecast_qty * 0.7)
-                    current_month = current_month + relativedelta(months=1)
-            
-            if not forecast_data:
-                return pd.DataFrame()
-            
-            forecast_df = pd.DataFrame(forecast_data)
-            
-            # Summary
-            total_qty = forecast_df['Forecast_Qty'].sum()
-            avg_adj = forecast_df['Manual_Adjustment'].mean()
-            
-            st.success(f"✅ Forecast generated: {len(forecast_df):,} records | Total: {total_qty:,.0f} | Avg Adjustment: {avg_adj:.2f}x")
-            
-            return forecast_df
+            return df_rofo, month_cols
             
         except Exception as e:
-            st.error(f"Error: {str(e)}")
-            return pd.DataFrame()
+            st.error(f"❌ Error loading Rofo_onwards data: {str(e)}")
+            return pd.DataFrame(), []
     
-    # ================ MANUAL ADJUSTMENTS UI ================
-    st.markdown("#### ⚙️ Manual Monthly Adjustments")
-    st.caption("Adjust forecast for specific months (1.0 = no adjustment, 1.3 = +30%, 0.7 = -30%)")
+    # Load rofo data
+    df_rofo, month_cols = load_rofo_onwards_data(client)
     
-    # Create adjustment matrix by year and month
-    if 'df_sales' in locals() and not df_sales.empty:
-        last_year = df_sales['Month'].max().year
-        forecast_years = [last_year + 1, last_year + 2]
+    if df_rofo.empty:
+        st.warning("⚠️ No Rofo_onwards data found. Please check your Google Sheet.")
+        st.info("""
+        **Required sheet name:** `Rofo_onwards`
+        
+        **Required columns:**
+        - SKU_ID
+        - Product_Name
+        - Brand
+        - SKU_Tier
+        - Jan-26, Feb-26, ... Dec-26, Jan-27 (month columns)
+        
+        **Optional columns:**
+        - Notes (for any comments)
+        """)
+        st.stop()
+    
+    # ================ DATA VALIDATION CHECKS ================
+    st.divider()
+    st.subheader("✅ Data Quality Check")
+    
+    validation_results = []
+    
+    # Check 1: Required columns
+    required_cols = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier']
+    missing_cols = [col for col in required_cols if col not in df_rofo.columns]
+    
+    if missing_cols:
+        validation_results.append({
+            'Check': 'Required Columns',
+            'Status': '❌ FAILED',
+            'Details': f"Missing: {', '.join(missing_cols)}"
+        })
     else:
-        current_year = datetime.now().year
-        forecast_years = [current_year + 1, current_year + 2]
+        validation_results.append({
+            'Check': 'Required Columns',
+            'Status': '✅ PASSED',
+            'Details': f"All required columns present"
+        })
     
-    # Initialize session state for adjustments
-    if 'manual_adjustments' not in st.session_state:
-        st.session_state.manual_adjustments = {}
+    # Check 2: Month columns
+    if month_cols:
+        validation_results.append({
+            'Check': 'Month Columns',
+            'Status': '✅ PASSED',
+            'Details': f"Found {len(month_cols)} month columns"
+        })
+    else:
+        validation_results.append({
+            'Check': 'Month Columns',
+            'Status': '❌ FAILED',
+            'Details': "No month columns found (expected Jan-26, Feb-26, etc.)"
+        })
     
-    # Create adjustment table
-    month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
-                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-    
-    # Display adjustment matrix
-    adjustment_data = []
-    
-    for year in forecast_years:
-        for month_num, month_name in enumerate(month_names, 1):
-            key = (year, month_num)
-            default_value = st.session_state.manual_adjustments.get(key, 1.0)
-            adjustment_data.append({
-                'Year': year,
-                'Month': month_name,
-                'Adjustment': default_value
+    # Check 3: SKU coverage
+    if 'SKU_ID' in df_rofo.columns:
+        total_skus = len(df_rofo)
+        active_skus = len(df_product[df_product['Status'].str.upper() == 'ACTIVE']) if 'df_product' in locals() else 0
+        
+        if active_skus > 0:
+            coverage_pct = (total_skus / active_skus) * 100
+            validation_results.append({
+                'Check': 'SKU Coverage',
+                'Status': '⚠️ CHECK' if coverage_pct < 80 else '✅ GOOD',
+                'Details': f"{total_skus} SKUs ({coverage_pct:.1f}% of {active_skus} active)"
             })
     
-    # Create editable dataframe
-    adjustment_df = pd.DataFrame(adjustment_data)
+    # Check 4: Zero values
+    if month_cols:
+        zero_counts = (df_rofo[month_cols] == 0).sum().sum()
+        total_cells = len(df_rofo) * len(month_cols)
+        zero_pct = (zero_counts / total_cells) * 100
+        
+        status = '✅ GOOD' if zero_pct < 20 else '⚠️ WARNING' if zero_pct < 50 else '❌ HIGH'
+        validation_results.append({
+            'Check': 'Zero Values',
+            'Status': status,
+            'Details': f"{zero_counts:,} zero cells ({zero_pct:.1f}% of total)"
+        })
     
-    # Use st.data_editor for interactive editing
-    edited_df = st.data_editor(
-        adjustment_df,
+    # Check 5: Negative values
+    if month_cols:
+        negative_counts = (df_rofo[month_cols] < 0).sum().sum()
+        if negative_counts > 0:
+            validation_results.append({
+                'Check': 'Negative Values',
+                'Status': '❌ FAILED',
+                'Details': f"{negative_counts:,} negative values found"
+            })
+        else:
+            validation_results.append({
+                'Check': 'Negative Values',
+                'Status': '✅ PASSED',
+                'Details': "No negative values"
+            })
+    
+    # Display validation results
+    validation_df = pd.DataFrame(validation_results)
+    st.dataframe(
+        validation_df,
         column_config={
-            "Year": st.column_config.NumberColumn(
-                "Year",
-                min_value=2024,
-                max_value=2030,
-                step=1,
-                format="%d"
+            "Status": st.column_config.TextColumn(
+                "Status",
+                width="small"
             ),
-            "Month": st.column_config.TextColumn(
-                "Month",
-                disabled=True
-            ),
-            "Adjustment": st.column_config.NumberColumn(
-                "Adjustment Factor",
-                min_value=0.0,
-                max_value=3.0,
-                step=0.05,
-                format="%.2f",
-                help="1.0 = no change, 1.3 = +30%, 0.7 = -30%"
+            "Details": st.column_config.TextColumn(
+                "Details",
+                width="large"
             )
         },
-        hide_index=True,
         use_container_width=True,
-        num_rows="fixed",
-        height=300
+        hide_index=True
     )
     
-    # Update session state with edited values
-    for _, row in edited_df.iterrows():
-        year = int(row['Year'])
-        month_num = month_names.index(row['Month']) + 1
-        key = (year, month_num)
-        st.session_state.manual_adjustments[key] = float(row['Adjustment'])
-    
-    # Quick preset buttons
-    st.markdown("#### 🎯 Quick Presets")
-    
-    preset_cols = st.columns(5)
-    
-    with preset_cols[0]:
-        if st.button("Normal Year", use_container_width=True):
-            # Reset all to 1.0
-            for year in forecast_years:
-                for month_num in range(1, 13):
-                    st.session_state.manual_adjustments[(year, month_num)] = 1.0
-            st.rerun()
-    
-    with preset_cols[1]:
-        if st.button("Holiday Boost", use_container_width=True):
-            # Boost holiday months
-            holiday_months = {
-                1: 0.95,   # Jan: slight dip after Dec
-                8: 1.3,    # Aug: Brand Day
-                11: 1.2,   # Nov: 11.11
-                12: 1.25   # Dec: 12.12
-            }
-            for year in forecast_years:
-                for month_num, factor in holiday_months.items():
-                    st.session_state.manual_adjustments[(year, month_num)] = factor
-            st.rerun()
-    
-    with preset_cols[2]:
-        if st.button("Conservative", use_container_width=True):
-            # Conservative adjustments
-            for year in forecast_years:
-                for month_num in range(1, 13):
-                    st.session_state.manual_adjustments[(year, month_num)] = 0.9
-            st.rerun()
-    
-    with preset_cols[3]:
-        if st.button("Growth Year", use_container_width=True):
-            # Growth scenario
-            for year in forecast_years:
-                for month_num in range(1, 13):
-                    st.session_state.manual_adjustments[(year, month_num)] = 1.15
-            st.rerun()
-    
-    with preset_cols[4]:
-        if st.button("Clear All", use_container_width=True):
-            # Clear all adjustments
-            st.session_state.manual_adjustments = {}
-            st.rerun()
-    
-    # ================ FORECAST SETTINGS ================
+    # ================ ROFO SUMMARY DASHBOARD ================
     st.divider()
-    st.subheader("📅 Forecast Settings")
+    st.subheader("📊 Rofo Overview")
     
-    col_set1, col_set2 = st.columns(2)
+    # Summary metrics
+    if month_cols:
+        # Calculate totals by month
+        monthly_totals = df_rofo[month_cols].sum()
+        monthly_totals_df = pd.DataFrame({
+            'Month': monthly_totals.index,
+            'Total_Rofo': monthly_totals.values
+        })
+        
+        # Format month names for sorting
+        def parse_rofo_month(month_str):
+            try:
+                month_part, year_part = month_str.split('-')
+                month_num = datetime.strptime(month_part, '%b').month
+                year = 2000 + int(year_part) if int(year_part) < 100 else int(year_part)
+                return datetime(year, month_num, 1)
+            except:
+                return datetime.now()
+        
+        monthly_totals_df['Month_Date'] = monthly_totals_df['Month'].apply(parse_rofo_month)
+        monthly_totals_df = monthly_totals_df.sort_values('Month_Date')
+        
+        # Display metrics
+        col_metric1, col_metric2, col_metric3, col_metric4 = st.columns(4)
+        
+        with col_metric1:
+            total_rofo = monthly_totals_df['Total_Rofo'].sum()
+            st.metric("Total Rofo Volume", f"{total_rofo:,.0f}")
+        
+        with col_metric2:
+            avg_monthly = monthly_totals_df['Total_Rofo'].mean()
+            st.metric("Avg Monthly", f"{avg_monthly:,.0f}")
+        
+        with col_metric3:
+            peak_month = monthly_totals_df.loc[monthly_totals_df['Total_Rofo'].idxmax()]
+            st.metric("Peak Month", f"{peak_month['Total_Rofo']:,.0f}")
+            st.caption(peak_month['Month'])
+        
+        with col_metric4:
+            growth_6m = 0
+            if len(monthly_totals_df) >= 7:
+                first_half = monthly_totals_df.head(6)['Total_Rofo'].mean()
+                second_half = monthly_totals_df.tail(6)['Total_Rofo'].mean()
+                if first_half > 0:
+                    growth_6m = ((second_half - first_half) / first_half) * 100
+            
+            st.metric("6M Growth Trend", f"{growth_6m:+.1f}%")
     
-    with col_set1:
-        # Start month selection
-        if not df_sales.empty:
-            last_sales_month = df_sales['Month'].max()
-            
-            available_months = []
-            current_month = last_sales_month + relativedelta(months=1)
-            
-            for _ in range(24):
-                available_months.append(current_month)
-                current_month = current_month + relativedelta(months=1)
-            
-            month_options = [m.strftime('%b %Y') for m in available_months]
-            month_values = available_months
-            
-            selected_idx = st.selectbox(
-                "Start Forecast From:",
-                options=range(len(month_options)),
-                format_func=lambda x: month_options[x],
-                index=0
-            )
-            
-            start_month = month_values[selected_idx]
-            
-            # Preview adjustments for first year
-            preview_year = start_month.year
-            st.caption(f"**Preview adjustments for {preview_year}:**")
-            preview_text = []
-            for month_num in range(1, 13):
-                adj = st.session_state.manual_adjustments.get((preview_year, month_num), 1.0)
-                if adj != 1.0:
-                    preview_text.append(f"{month_names[month_num-1]}: {adj:.2f}x")
-            
-            if preview_text:
-                st.caption(", ".join(preview_text[:4]) + ("..." if len(preview_text) > 4 else ""))
-            else:
-                st.caption("No adjustments set")
-        
-        else:
-            start_month = datetime.now().replace(day=1)
-            st.info("Using current month as start")
+    # ================ ROFO TREND ANALYSIS ================
+    st.divider()
+    st.subheader("📈 Rofo Trend Analysis")
     
-    with col_set2:
-        # Additional settings
-        st.markdown("#### ⚙️ Additional Settings")
+    if month_cols and len(monthly_totals_df) > 0:
+        # Create trend chart
+        fig_trend = go.Figure()
         
-        apply_baseline_exclusion = st.checkbox(
-            "Exclude Mar-Jun 2025 from baseline",
-            value=True,
-            help="Exclude strategy failure period from baseline calculation"
-        )
-        
-        baseline_method = st.selectbox(
-            "Baseline Calculation",
-            options=["Weighted 6-month", "Simple 3-month", "12-month average"],
-            index=0
-        )
-        
-        smoothing_factor = st.slider(
-            "Month-to-month Smoothing",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.7,
-            step=0.1,
-            help="Higher = more smoothing between months"
-        )
-    
-    # ================ GENERATE FORECAST ================
-    if st.button("🚀 Generate Forecast with Adjustments", type="primary", use_container_width=True):
-        with st.spinner("Generating forecast with custom adjustments..."):
-            forecast_df = generate_forecast_with_adjustments(
-                df_sales, 
-                df_product, 
-                start_month,
-                st.session_state.manual_adjustments
-            )
-            
-            if not forecast_df.empty:
-                st.session_state['forecast_data'] = forecast_df
-                st.session_state['forecast_start'] = start_month
-                st.session_state['used_adjustments'] = st.session_state.manual_adjustments.copy()
-    
-    # ================ DISPLAY RESULTS ================
-    if 'forecast_data' in st.session_state and not st.session_state['forecast_data'].empty:
-        forecast_df = st.session_state['forecast_data']
-        start_month = st.session_state.get('forecast_start', start_month)
-        used_adjustments = st.session_state.get('used_adjustments', {})
-        
-        st.divider()
-        st.subheader("📊 Forecast Results")
-        
-        # Summary metrics
-        col_sum1, col_sum2, col_sum3, col_sum4 = st.columns(4)
-        
-        with col_sum1:
-            total_skus = forecast_df['SKU_ID'].nunique()
-            st.metric("Total SKUs", total_skus)
-        
-        with col_sum2:
-            total_forecast = forecast_df['Forecast_Qty'].sum()
-            st.metric("Total Forecast", f"{total_forecast:,.0f}")
-        
-        with col_sum3:
-            applied_adjustments = len([v for v in used_adjustments.values() if v != 1.0])
-            st.metric("Adjustments Applied", applied_adjustments)
-        
-        with col_sum4:
-            avg_adjustment = forecast_df['Manual_Adjustment'].mean()
-            st.metric("Avg Adjustment", f"{avg_adjustment:.2f}x")
-        
-        # ================ TREND CHART WITH HISTORICAL ================
-        st.divider()
-        st.subheader("📈 Forecast vs Historical Trend")
-        
-        # Chart controls
-        col_chart1, col_chart2 = st.columns(2)
-        
-        with col_chart1:
-            # Brand filter
-            all_brands = forecast_df['Brand'].unique()
-            selected_brands = st.multiselect(
-                "Filter Brands (Chart)",
-                options=all_brands,
-                default=all_brands[:min(3, len(all_brands))],
-                help="Select brands to show in chart"
-            )
-        
-        with col_chart2:
-            # Historical months
-            show_history = st.checkbox("Show Historical Sales", value=True)
-            history_months = st.slider(
-                "Historical Months to Show",
-                min_value=0,
-                max_value=24,
-                value=12,
-                disabled=not show_history
-            )
-        
-        # Prepare chart data
-        # 1. Aggregate forecast data
-        if selected_brands and len(selected_brands) > 0:
-            forecast_chart_data = forecast_df[forecast_df['Brand'].isin(selected_brands)]
-        else:
-            forecast_chart_data = forecast_df
-        
-        monthly_forecast = forecast_chart_data.groupby(['Forecast_Month', 'Month_Label']).agg({
-            'Forecast_Qty': 'sum'
-        }).reset_index()
-        monthly_forecast = monthly_forecast.sort_values('Forecast_Month')
-        
-        # 2. Get historical data
-        historical_data = pd.DataFrame()
-        if show_history and history_months > 0 and not df_sales.empty:
-            # Get historical months
-            earliest_forecast_month = monthly_forecast['Forecast_Month'].min()
-            history_start = earliest_forecast_month - relativedelta(months=history_months)
-            
-            # Filter sales data
-            hist_sales = df_sales.copy()
-            hist_sales = add_product_info_to_data(hist_sales, df_product)
-            
-            if selected_brands and len(selected_brands) > 0:
-                hist_sales = hist_sales[hist_sales['Brand'].isin(selected_brands)]
-            
-            hist_sales = hist_sales[
-                (hist_sales['Month'] >= history_start) & 
-                (hist_sales['Month'] < earliest_forecast_month)
-            ]
-            
-            if not hist_sales.empty:
-                monthly_history = hist_sales.groupby('Month').agg({
-                    'Sales_Qty': 'sum'
-                }).reset_index()
-                monthly_history['Month_Label'] = monthly_history['Month'].apply(lambda x: x.strftime('%b-%Y'))
-                monthly_history = monthly_history.sort_values('Month')
-                historical_data = monthly_history
-        
-        # Create LINE CHART
-        fig = go.Figure()
-        
-        # Add historical line (if available)
-        if not historical_data.empty:
-            fig.add_trace(go.Scatter(
-                x=historical_data['Month_Label'],
-                y=historical_data['Sales_Qty'],
-                name='Historical Sales',
-                mode='lines',
-                line=dict(color='#4CAF50', width=3),
-                hovertemplate='<b>%{x}</b><br>Sales: %{y:,.0f}<extra></extra>'
-            ))
-        
-        # Add forecast line
-        fig.add_trace(go.Scatter(
-            x=monthly_forecast['Month_Label'],
-            y=monthly_forecast['Forecast_Qty'],
-            name='Forecast',
-            mode='lines',
-            line=dict(color='#667eea', width=3, dash='dash'),
-            hovertemplate='<b>%{x}</b><br>Forecast: %{y:,.0f}<extra></extra>'
+        # Line chart for total rofo
+        fig_trend.add_trace(go.Scatter(
+            x=monthly_totals_df['Month'],
+            y=monthly_totals_df['Total_Rofo'],
+            name='Total Rofo',
+            mode='lines+markers',
+            line=dict(color='#667eea', width=3),
+            marker=dict(size=8, color='#667eea'),
+            hovertemplate='<b>%{x}</b><br>Rofo: %{y:,.0f}<extra></extra>'
         ))
         
-        # Add adjustment markers
-        adjustment_months = []
-        adjustment_values = []
-        
-        for _, row in monthly_forecast.iterrows():
-            month_date = row['Forecast_Month']
-            key = (month_date.year, month_date.month)
-            adjustment = used_adjustments.get(key, 1.0)
-            
-            if adjustment != 1.0:
-                adjustment_months.append(row['Month_Label'])
-                adjustment_values.append(row['Forecast_Qty'])
-        
-        if adjustment_months:
-            fig.add_trace(go.Scatter(
-                x=adjustment_months,
-                y=adjustment_values,
-                name='Adjusted Months',
-                mode='markers',
-                marker=dict(
-                    size=10,
-                    color='#FF9800',
-                    symbol='diamond'
-                ),
-                hovertemplate='<b>%{x}</b><br>Adjusted Forecast: %{y:,.0f}<extra></extra>'
-            ))
+        # Add historical sales comparison if available
+        if not df_sales.empty and 'Month' in df_sales.columns:
+            # Get last 12 months of sales
+            sales_months = sorted(df_sales['Month'].unique())
+            if len(sales_months) >= 12:
+                last_12_sales = sales_months[-12:]
+                df_recent_sales = df_sales[df_sales['Month'].isin(last_12_sales)]
+                
+                monthly_sales = df_recent_sales.groupby('Month').agg({
+                    'Sales_Qty': 'sum'
+                }).reset_index()
+                
+                monthly_sales = monthly_sales.sort_values('Month')
+                monthly_sales['Month_Label'] = monthly_sales['Month'].apply(lambda x: x.strftime('%b-%y'))
+                
+                # Align with rofo timeline
+                fig_trend.add_trace(go.Scatter(
+                    x=monthly_sales['Month_Label'],
+                    y=monthly_sales['Sales_Qty'],
+                    name='Historical Sales (12M)',
+                    mode='lines',
+                    line=dict(color='#4CAF50', width=2, dash='dot'),
+                    hovertemplate='<b>%{x}</b><br>Sales: %{y:,.0f}<extra></extra>'
+                ))
         
         # Update layout
-        fig.update_layout(
+        fig_trend.update_layout(
             height=500,
-            title='Forecast Trend with Manual Adjustments',
+            title='Rofo Forecast Trend vs Historical Sales',
             xaxis_title='Month',
             yaxis_title='Quantity',
             hovermode='x unified',
@@ -3612,208 +3365,403 @@ with tab7:
             showlegend=True
         )
         
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig_trend, use_container_width=True)
         
-        # Chart insights
-        st.markdown("#### 💡 Chart Insights")
+        # Trend insights
+        st.markdown("#### 💡 Trend Insights")
         
         insights = []
         
-        # Check adjustment impact
-        if adjustment_months:
-            insights.append(f"**{len(adjustment_months)} months** have manual adjustments applied")
+        # Check for spikes
+        if len(monthly_totals_df) >= 3:
+            for i in range(1, len(monthly_totals_df)):
+                prev = monthly_totals_df.iloc[i-1]['Total_Rofo']
+                curr = monthly_totals_df.iloc[i]['Total_Rofo']
+                month_name = monthly_totals_df.iloc[i]['Month']
+                
+                if prev > 0:
+                    growth = ((curr - prev) / prev) * 100
+                    
+                    if growth > 30:
+                        insights.append(f"**{month_name}**: +{growth:.0f}% spike from previous month")
+                    elif growth < -20:
+                        insights.append(f"**{month_name}**: {growth:.0f}% dip from previous month")
         
-        # Compare forecast vs historical
-        if not historical_data.empty and not monthly_forecast.empty:
-            hist_avg = historical_data['Sales_Qty'].mean()
-            forecast_avg = monthly_forecast['Forecast_Qty'].mean()
-            
-            if hist_avg > 0:
-                growth = ((forecast_avg - hist_avg) / hist_avg) * 100
-                insights.append(f"Projected **{growth:+.1f}%** vs historical average")
+        # Check seasonality pattern
+        if len(monthly_totals_df) >= 12:
+            # Identify holiday peaks
+            holiday_months = ['Aug', 'Nov', 'Dec']
+            for month_row in monthly_totals_df.itertuples():
+                month_name = month_row.Month[:3]
+                if month_name in holiday_months and month_row.Total_Rofo > avg_monthly * 1.2:
+                    insights.append(f"**{month_row.Month}**: Holiday season peak detected")
         
         if insights:
-            for insight in insights:
+            for insight in insights[:3]:  # Show top 3 insights
                 st.info(insight)
-        
-        # ================ ADJUSTMENT SUMMARY ================
-        st.divider()
-        st.subheader("📋 Adjustment Summary")
-        
-        # Show adjustments table
-        adj_summary = []
-        for (year, month), adj in used_adjustments.items():
-            if adj != 1.0:
-                adj_summary.append({
-                    'Year': year,
-                    'Month': month_names[month-1],
-                    'Adjustment': f"{adj:.2f}x",
-                    'Impact': f"{((adj - 1) * 100):+.0f}%"
-                })
-        
-        if adj_summary:
-            adj_df = pd.DataFrame(adj_summary)
-            st.dataframe(
-                adj_df.sort_values(['Year', 'Month']),
-                use_container_width=True,
-                height=200
-            )
         else:
-            st.info("No manual adjustments applied (all factors = 1.0x)")
-        
-        # ================ DETAILED DATA ================
-        st.divider()
-        st.subheader("📄 Detailed Forecast Data")
-        
-        # Data filters
-        col_filt1, col_filt2, col_filt3 = st.columns(3)
-        
-        with col_filt1:
-            detail_brand_filter = st.multiselect(
-                "Brand Filter",
-                options=forecast_df['Brand'].unique(),
-                default=[],
-                key="detail_brand"
-            )
-        
-        with col_filt2:
-            detail_month_filter = st.multiselect(
-                "Month Filter",
-                options=sorted(forecast_df['Month_Label'].unique()),
-                default=[],
-                key="detail_month"
-            )
-        
-        with col_filt3:
-            adj_filter = st.selectbox(
-                "Adjustment Filter",
-                options=['All', 'Adjusted (>1.0x)', 'Reduced (<1.0x)', 'No Adjustment (=1.0x)'],
-                key="adj_filter"
-            )
-        
-        # Apply filters
-        detail_df = forecast_df.copy()
-        
-        if detail_brand_filter:
-            detail_df = detail_df[detail_df['Brand'].isin(detail_brand_filter)]
-        
-        if detail_month_filter:
-            detail_df = detail_df[detail_df['Month_Label'].isin(detail_month_filter)]
-        
-        if adj_filter == 'Adjusted (>1.0x)':
-            detail_df = detail_df[detail_df['Manual_Adjustment'] > 1.0]
-        elif adj_filter == 'Reduced (<1.0x)':
-            detail_df = detail_df[detail_df['Manual_Adjustment'] < 1.0]
-        elif adj_filter == 'No Adjustment (=1.0x)':
-            detail_df = detail_df[detail_df['Manual_Adjustment'] == 1.0]
-        
-        # Display
-        display_cols = ['SKU_ID', 'Product_Name', 'Brand', 'Month_Label', 
-                       'Forecast_Qty', 'YoY_Growth', 'Manual_Adjustment', 'Final_Growth']
-        
-        display_df = detail_df[display_cols].copy()
-        display_df = display_df.sort_values(['Brand', 'SKU_ID', 'Month_Label'])
-        
-        # Format
-        display_df['YoY_Growth'] = display_df['YoY_Growth'].apply(lambda x: f"{x:.2f}x")
-        display_df['Manual_Adjustment'] = display_df['Manual_Adjustment'].apply(lambda x: f"{x:.2f}x")
-        display_df['Final_Growth'] = display_df['Final_Growth'].apply(lambda x: f"{x:.2f}x")
-        
-        st.dataframe(
-            display_df.rename(columns={
-                'SKU_ID': 'SKU',
-                'Product_Name': 'Product',
-                'Month_Label': 'Month',
-                'Forecast_Qty': 'Forecast',
-                'YoY_Growth': 'YoY Growth',
-                'Manual_Adjustment': 'Adjustment',
-                'Final_Growth': 'Final Growth'
-            }),
-            use_container_width=True,
-            height=400
-        )
-        
-        # ================ DOWNLOAD OPTIONS ================
-        st.divider()
-        st.subheader("📥 Download Options")
-        
-        col_dl1, col_dl2, col_dl3 = st.columns(3)
-        
-        with col_dl1:
-            # Pivot format for Excel
-            pivot_df = forecast_df.pivot_table(
-                index=['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier'],
-                columns='Month_Label',
-                values='Forecast_Qty',
-                aggfunc='sum',
-                fill_value=0
-            ).reset_index()
-            
-            csv_pivot = pivot_df.to_csv(index=False)
-            st.download_button(
-                label="📊 Excel Format",
-                data=csv_pivot,
-                file_name=f"forecast_{start_month.strftime('%Y%m')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-        
-        with col_dl2:
-            # Full data with adjustments
-            csv_full = forecast_df.to_csv(index=False)
-            st.download_button(
-                label="📋 Full Data",
-                data=csv_full,
-                file_name=f"forecast_detailed_{start_month.strftime('%Y%m')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-        
-        with col_dl3:
-            # Adjustments summary
-            adj_data = []
-            for (year, month), adj in used_adjustments.items():
-                if adj != 1.0:
-                    adj_data.append({
-                        'Year': year,
-                        'Month': month_names[month-1],
-                        'Adjustment': adj,
-                        'Impact_Percent': (adj - 1) * 100
-                    })
-            
-            if adj_data:
-                adj_df = pd.DataFrame(adj_data)
-                csv_adj = adj_df.to_csv(index=False)
-                
-                st.download_button(
-                    label="🎯 Adjustments",
-                    data=csv_adj,
-                    file_name=f"adjustments_{start_month.strftime('%Y%m')}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-            else:
-                st.button("🎯 No Adjustments", disabled=True, use_container_width=True)
+            st.success("✅ Trend appears stable without extreme fluctuations")
     
+    # ================ BRAND-LEVEL ANALYSIS ================
+    st.divider()
+    st.subheader("🏷️ Brand Performance Analysis")
+    
+    if 'Brand' in df_rofo.columns and month_cols:
+        # Aggregate by brand
+        brand_totals = df_rofo.groupby('Brand')[month_cols].sum().sum(axis=1)
+        brand_totals = brand_totals.sort_values(ascending=False)
+        
+        col_brand1, col_brand2 = st.columns(2)
+        
+        with col_brand1:
+            # Top brands bar chart
+            top_brands = brand_totals.head(10)
+            
+            fig_brands = px.bar(
+                x=top_brands.index,
+                y=top_brands.values,
+                title='Top 10 Brands by Rofo Volume',
+                labels={'x': 'Brand', 'y': 'Total Rofo'},
+                color=top_brands.values,
+                color_continuous_scale='Viridis'
+            )
+            
+            fig_brands.update_layout(height=400)
+            st.plotly_chart(fig_brands, use_container_width=True)
+        
+        with col_brand2:
+            # Brand distribution pie
+            fig_pie = px.pie(
+                values=brand_totals.values,
+                names=brand_totals.index,
+                title='Brand Distribution',
+                hole=0.3
+            )
+            
+            fig_pie.update_layout(height=400)
+            st.plotly_chart(fig_pie, use_container_width=True)
+        
+        # Brand growth analysis
+        st.markdown("#### 📈 Brand Growth Analysis")
+        
+        # Calculate month-over-month growth by brand
+        if len(month_cols) >= 2:
+            # Get first and last 3 months average for each brand
+            first_3_months = month_cols[:3]
+            last_3_months = month_cols[-3:] if len(month_cols) >= 6 else month_cols[-2:]
+            
+            brand_growth = []
+            for brand in brand_totals.index[:10]:  # Top 10 brands only
+                brand_data = df_rofo[df_rofo['Brand'] == brand]
+                
+                if not brand_data.empty:
+                    first_avg = brand_data[first_3_months].sum().sum() / len(first_3_months)
+                    last_avg = brand_data[last_3_months].sum().sum() / len(last_3_months)
+                    
+                    if first_avg > 0:
+                        growth_pct = ((last_avg - first_avg) / first_avg) * 100
+                        brand_growth.append({
+                            'Brand': brand,
+                            'Start_Avg': first_avg,
+                            'End_Avg': last_avg,
+                            'Growth_%': growth_pct
+                        })
+            
+            if brand_growth:
+                growth_df = pd.DataFrame(brand_growth)
+                growth_df = growth_df.sort_values('Growth_%', ascending=False)
+                
+                # Display growth table
+                st.dataframe(
+                    growth_df,
+                    column_config={
+                        "Brand": st.column_config.TextColumn("Brand"),
+                        "Start_Avg": st.column_config.NumberColumn("Start (Avg)", format="%.0f"),
+                        "End_Avg": st.column_config.NumberColumn("End (Avg)", format="%.0f"),
+                        "Growth_%": st.column_config.NumberColumn("Growth %", format="%.1f%%")
+                    },
+                    use_container_width=True,
+                    height=300
+                )
+    
+    # ================ ACHIEVABILITY ANALYSIS ================
+    st.divider()
+    st.subheader("🎯 Achievability Check")
+    
+    if not df_sales.empty and month_cols:
+        st.markdown("**Comparing Rofo with Historical Performance**")
+        
+        # Calculate historical benchmarks
+        sales_months = sorted(df_sales['Month'].unique())
+        if len(sales_months) >= 12:
+            # Last 12 months sales
+            last_12 = sales_months[-12:]
+            df_last_year = df_sales[df_sales['Month'].isin(last_12)]
+            
+            # Monthly sales average
+            monthly_sales_avg = df_last_year.groupby(df_last_year['Month'].dt.month)['Sales_Qty'].sum().mean()
+            
+            # Best month sales
+            best_month_sales = df_last_year.groupby('Month')['Sales_Qty'].sum().max()
+            
+            # Compare with rofo
+            rofo_monthly_avg = monthly_totals_df['Total_Rofo'].mean() if 'monthly_totals_df' in locals() else 0
+            rofo_peak = monthly_totals_df['Total_Rofo'].max() if 'monthly_totals_df' in locals() else 0
+            
+            col_ach1, col_ach2, col_ach3, col_ach4 = st.columns(4)
+            
+            with col_ach1:
+                if monthly_sales_avg > 0:
+                    rofo_vs_avg = (rofo_monthly_avg / monthly_sales_avg) * 100
+                    status = "✅ Achievable" if rofo_vs_avg <= 120 else "⚠️ Challenging" if rofo_vs_avg <= 150 else "❌ Aggressive"
+                    st.metric(
+                        "Vs Historical Avg",
+                        f"{rofo_vs_avg:.0f}%",
+                        delta=status
+                    )
+            
+            with col_ach2:
+                if best_month_sales > 0:
+                    peak_vs_best = (rofo_peak / best_month_sales) * 100
+                    status = "✅ Normal" if peak_vs_best <= 120 else "⚠️ High" if peak_vs_best <= 150 else "❌ Very High"
+                    st.metric(
+                        "Peak vs Best Month",
+                        f"{peak_vs_best:.0f}%",
+                        delta=status
+                    )
+            
+            with col_ach3:
+                # Growth rate check
+                if len(monthly_totals_df) >= 2:
+                    first_month = monthly_totals_df.iloc[0]['Total_Rofo']
+                    last_month = monthly_totals_df.iloc[-1]['Total_Rofo']
+                    
+                    if first_month > 0:
+                        total_growth = ((last_month - first_month) / first_month) * 100
+                        status = "✅ Steady" if abs(total_growth) <= 20 else "⚠️ Volatile" if abs(total_growth) <= 50 else "❌ Extreme"
+                        st.metric(
+                            "Total Growth",
+                            f"{total_growth:+.0f}%",
+                            delta=status
+                        )
+            
+            with col_ach4:
+                # SKU productivity check
+                avg_rofo_per_sku = total_rofo / len(df_rofo) if len(df_rofo) > 0 else 0
+                st.metric(
+                    "Avg per SKU",
+                    f"{avg_rofo_per_sku:,.0f}",
+                    help="Average rofo quantity per SKU"
+                )
+        
+        # Achievability recommendations
+        st.markdown("#### 💡 Achievability Recommendations")
+        
+        recommendations = []
+        
+        if 'rofo_vs_avg' in locals() and rofo_vs_avg > 120:
+            recommendations.append(f"**Rofo is {rofo_vs_avg:.0f}% above historical average** - Consider more conservative targets")
+        
+        if 'peak_vs_best' in locals() and peak_vs_best > 130:
+            recommendations.append(f"**Peak month is {peak_vs_best:.0f}% above best historical month** - Ensure sufficient capacity")
+        
+        if 'zero_pct' in locals() and zero_pct > 30:
+            recommendations.append(f"**{zero_pct:.1f}% of cells are zero** - Review SKUs with no forecast")
+        
+        if recommendations:
+            for rec in recommendations:
+                st.warning(rec)
+        else:
+            st.success("✅ Rofo appears achievable based on historical performance")
+    
+    # ================ SKU-LEVEL VALIDATION ================
+    st.divider()
+    st.subheader("🔍 SKU-Level Validation")
+    
+    # Filter options
+    col_sku1, col_sku2, col_sku3 = st.columns(3)
+    
+    with col_sku1:
+        sku_brand_filter = st.multiselect(
+            "Filter by Brand",
+            options=df_rofo['Brand'].unique() if 'Brand' in df_rofo.columns else [],
+            default=[]
+        )
+    
+    with col_sku2:
+        sku_tier_filter = st.multiselect(
+            "Filter by Tier",
+            options=df_rofo['SKU_Tier'].unique() if 'SKU_Tier' in df_rofo.columns else [],
+            default=[]
+        )
+    
+    with col_sku3:
+        # Find SKUs with potential issues
+        issue_options = ['All SKUs', 'High Volatility', 'Zero Forecast', 'Peak Spikes']
+        selected_issue = st.selectbox(
+            "Focus on",
+            options=issue_options
+        )
+    
+    # Apply filters
+    filtered_rofo = df_rofo.copy()
+    
+    if sku_brand_filter:
+        filtered_rofo = filtered_rofo[filtered_rofo['Brand'].isin(sku_brand_filter)]
+    
+    if sku_tier_filter:
+        filtered_rofo = filtered_rofo[filtered_rofo['SKU_Tier'].isin(sku_tier_filter)]
+    
+    # Identify SKUs with issues
+    if selected_issue != 'All SKUs' and month_cols:
+        if selected_issue == 'High Volatility':
+            # Calculate coefficient of variation
+            filtered_rofo['CV'] = filtered_rofo[month_cols].std(axis=1) / filtered_rofo[month_cols].mean(axis=1)
+            filtered_rofo = filtered_rofo[filtered_rofo['CV'] > 0.5]  # High volatility
+            filtered_rofo = filtered_rofo.sort_values('CV', ascending=False)
+        
+        elif selected_issue == 'Zero Forecast':
+            # SKUs with many zero months
+            filtered_rofo['Zero_Count'] = (filtered_rofo[month_cols] == 0).sum(axis=1)
+            filtered_rofo = filtered_rofo[filtered_rofo['Zero_Count'] > len(month_cols) * 0.3]  # >30% zeros
+            filtered_rofo = filtered_rofo.sort_values('Zero_Count', ascending=False)
+        
+        elif selected_issue == 'Peak Spikes':
+            # SKUs with extreme spikes
+            def has_spike(row):
+                values = row[month_cols].values
+                if len(values) < 3:
+                    return False
+                max_val = max(values)
+                avg_val = np.mean(values)
+                return max_val > avg_val * 3  # Spike > 3x average
+            
+            filtered_rofo['Has_Spike'] = filtered_rofo.apply(has_spike, axis=1)
+            filtered_rofo = filtered_rofo[filtered_rofo['Has_Spike']]
+    
+    # Display SKU details
+    display_cols = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier']
+    if 'Notes' in filtered_rofo.columns:
+        display_cols.append('Notes')
+    
+    # Add summary metrics
+    if month_cols:
+        filtered_rofo['Total_Rofo'] = filtered_rofo[month_cols].sum(axis=1)
+        filtered_rofo['Avg_Monthly'] = filtered_rofo[month_cols].mean(axis=1)
+        filtered_rofo['Max_Month'] = filtered_rofo[month_cols].max(axis=1)
+        
+        display_cols.extend(['Total_Rofo', 'Avg_Monthly', 'Max_Month'])
+    
+    st.dataframe(
+        filtered_rofo[display_cols],
+        column_config={
+            "Total_Rofo": st.column_config.NumberColumn("Total", format="%.0f"),
+            "Avg_Monthly": st.column_config.NumberColumn("Avg/Month", format="%.0f"),
+            "Max_Month": st.column_config.NumberColumn("Peak", format="%.0f")
+        },
+        use_container_width=True,
+        height=400
+    )
+    
+    # ================ DOWNLOAD & EXPORT ================
+    st.divider()
+    st.subheader("📥 Export & Reports")
+    
+    col_exp1, col_exp2, col_exp3 = st.columns(3)
+    
+    with col_exp1:
+        # Download original data
+        csv_original = df_rofo.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Rofo Data",
+            data=csv_original,
+            file_name=f"rofo_data_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    
+    with col_exp2:
+        # Download validation report
+        report_data = {
+            'Validation_Check': validation_df['Check'],
+            'Status': validation_df['Status'],
+            'Details': validation_df['Details']
+        }
+        report_df = pd.DataFrame(report_data)
+        csv_report = report_df.to_csv(index=False)
+        
+        st.download_button(
+            label="📊 Validation Report",
+            data=csv_report,
+            file_name=f"rofo_validation_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    
+    with col_exp3:
+        # Download insights
+        insights_data = {
+            'Metric': ['Total Rofo Volume', 'Average Monthly', 'Peak Month Value', 
+                      'Number of SKUs', 'Number of Brands', 'Data Quality Score'],
+            'Value': [
+                f"{total_rofo:,.0f}" if 'total_rofo' in locals() else "N/A",
+                f"{avg_monthly:,.0f}" if 'avg_monthly' in locals() else "N/A",
+                f"{peak_month['Total_Rofo']:,.0f}" if 'peak_month' in locals() else "N/A",
+                len(df_rofo),
+                df_rofo['Brand'].nunique() if 'Brand' in df_rofo.columns else 0,
+                f"{(len([r for r in validation_results if 'PASSED' in r['Status'] or 'GOOD' in r['Status']]) / len(validation_results)) * 100:.0f}%"
+            ]
+        }
+        insights_df = pd.DataFrame(insights_data)
+        csv_insights = insights_df.to_csv(index=False)
+        
+        st.download_button(
+            label="💡 Insights Summary",
+            data=csv_insights,
+            file_name=f"rofo_insights_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    
+    # ================ FINAL RECOMMENDATIONS ================
+    st.divider()
+    st.subheader("🎯 Final Recommendations")
+    
+    # Generate recommendations based on analysis
+    final_recommendations = []
+    
+    # Data quality
+    if 'zero_pct' in locals() and zero_pct > 20:
+        final_recommendations.append("**Review zero forecasts** - Consider removing SKUs with >20% zero months")
+    
+    # Achievability
+    if 'rofo_vs_avg' in locals() and rofo_vs_avg > 130:
+        final_recommendations.append("**Adjust targets downward** - Overall rofo is >30% above historical average")
+    
+    # Seasonality
+    if 'peak_vs_best' in locals() and peak_vs_best > 140:
+        final_recommendations.append("**Review peak month assumptions** - Ensure marketing/capacity aligns with targets")
+    
+    # SKU-level
+    if 'filtered_rofo' in locals() and len(filtered_rofo) < len(df_rofo) * 0.7:
+        final_recommendations.append("**Focus on key SKUs** - Consider Pareto analysis (80/20 rule)")
+    
+    if final_recommendations:
+        st.warning("#### ⚠️ Areas for Improvement:")
+        for rec in final_recommendations:
+            st.write(f"- {rec}")
     else:
-        # Initial state
-        st.info("""
-        **🎯 How to Use:**
-        
-        1. **Set Manual Adjustments**: Edit the table above to adjust specific months
-        2. **Use Quick Presets**: Apply common scenarios with one click
-        3. **Configure Settings**: Choose baseline method and smoothing
-        4. **Generate Forecast**: Click the button below
-        
-        **📊 Adjustment Examples:**
-        - **Lebaran (Eid)**: Set corresponding month to 1.3x-1.5x
-        - **Brand Day**: August to 1.3x-1.4x
-        - **11.11**: November to 1.2x-1.3x
-        - **12.12**: December to 1.25x-1.3x
-        - **Post-Holiday Dip**: January to 0.9x-0.95x
-        
-        **💡 Tip**: You can adjust different years independently (e.g., Lebaran might be in March 2024, April 2025, etc.)
-        """)
+        st.success("#### ✅ Rofo Looks Good!")
+        st.write("Your rofo forecast appears well-balanced and achievable based on historical data.")
+    
+    # Action items
+    st.info("""
+    **📋 Next Steps:**
+    1. **Review flagged SKUs** in the SKU-Level Validation section
+    2. **Adjust extreme values** based on achievability analysis
+    3. **Align with sales/marketing** for promotional calendar
+    4. **Monitor monthly** against actual sales performance
+    """)
 
 # --- FOOTER ---
 st.divider()
