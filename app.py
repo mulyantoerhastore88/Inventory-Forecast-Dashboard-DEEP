@@ -2790,12 +2790,28 @@ with tab3:
                 ].sort_values('Value_at_Cost', ascending=False)
                 
                 if not high_risk.empty:
-                    st.warning(f"⚠️ **{len(high_risk)} high-value slow-moving items detected**")
+                    st.warning(f"⚠️ {len(high_risk)} high-value slow-moving items detected")
+    
+                    # Pastikan kolom yang diperlukan ada
+                    available_cols = []
+                    for col in ['SKU_ID', 'Product_Name', 'Cover_Months', 'Value_at_Cost', 'Inventory_Status']:
+                        if col in high_risk.columns:
+                            available_cols.append(col)
+    
+                    if available_cols:
+                    # Tambahkan product info jika Product_Name tidak ada
+                    if 'Product_Name' not in available_cols and 'SKU_ID' in high_risk.columns:
+                        high_risk = add_product_info_to_data(high_risk, df_product)
+                        available_cols = [col for col in ['SKU_ID', 'Product_Name', 'Cover_Months', 
+                                                        'Value_at_Cost', 'Inventory_Status'] 
+                                        if col in high_risk.columns]
+        
                     st.dataframe(
-                        high_risk[['SKU_ID', 'Product_Name', 'Cover_Months', 
-                                 'Value_at_Cost', 'Inventory_Status']],
+                        high_risk[available_cols],
                         use_container_width=True
                     )
+                else:
+                    st.warning("No valid columns available for display")
                 else:
                     st.success("✅ No high-risk inventory items detected")
         
