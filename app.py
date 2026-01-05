@@ -9,6 +9,8 @@ import gspread
 from google.oauth2.service_account import Credentials
 from dateutil.relativedelta import relativedelta
 import warnings
+from tenacity import retry, stop_after_attempt, wait_exponential
+import math
 warnings.filterwarnings('ignore')
 
 # --- Konfigurasi Halaman ---
@@ -191,20 +193,63 @@ st.markdown("""
         box-shadow: 0 4px 15px rgba(0,0,0,0.08);
         border-top: 4px solid #667eea;
     }
+    
+    /* Financial cards */
+    .financial-card {
+        background: white;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin: 0.5rem 0;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        border-top: 4px solid;
+        transition: all 0.3s ease;
+    }
+    .financial-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+    }
+    .card-revenue { border-top-color: #667eea; }
+    .card-margin { border-top-color: #4CAF50; }
+    .card-cost { border-top-color: #FF9800; }
+    .card-inventory { border-top-color: #9C27B0; }
+    
+    /* Dark mode support */
+    @media (prefers-color-scheme: dark) {
+        .stApp {
+            background-color: #0E1117;
+            color: #FFFFFF;
+        }
+        .financial-card, .brand-card, .compact-metric {
+            background-color: #1E1E1E;
+            color: #FFFFFF;
+        }
+    }
+    
+    /* Progress bar animation */
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.7; }
+        100% { opacity: 1; }
+    }
+    
+    .pulse-animation {
+        animation: pulse 2s infinite;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # --- Judul Dashboard ---
-st.markdown('<h1 class="main-header">📊 INVENTORY INTELLIGENCE DASHBOARD</h1>', unsafe_allow_html=True)
-st.caption(f"🚀 Professional Inventory Control & Demand Planning | Real-time Analytics | Updated: {datetime.now().strftime('%d %B %Y %H:%M')}")
+st.markdown('<h1 class="main-header">💰 INVENTORY INTELLIGENCE PRO DASHBOARD</h1>', unsafe_allow_html=True)
+st.caption(f"🚀 Professional Inventory Control & Financial Analytics | Real-time Insights | Updated: {datetime.now().strftime('%d %B %Y %H:%M')}")
 
 # --- ====================================================== ---
 # ---                KONEKSI & LOAD DATA                    ---
 # --- ====================================================== ---
 
 @st.cache_resource(show_spinner=False)
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 def init_gsheet_connection():
-    """Inisialisasi koneksi ke Google Sheets"""
+    """Inisialisasi koneksi ke Google Sheets dengan retry mechanism"""
     try:
         skey = st.secrets["gcp_service_account"]
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -215,45 +260,59 @@ def init_gsheet_connection():
         st.error(f"❌ Koneksi Gagal: {str(e)}")
         return None
 
-def parse_month_label(label):
-    """Parse berbagai format bulan ke datetime"""
-    try:
-        label_str = str(label).strip().upper()
-        
-        # Mapping bulan
-        month_map = {
-            'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
-            'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12
-        }
-        
-        for month_name, month_num in month_map.items():
-            if month_name in label_str:
-                # Cari tahun
-                year_part = label_str.replace(month_name, '').replace('-', '').replace(' ', '').strip()
-                if year_part:
-                    year = int('20' + year_part) if len(year_part) == 2 else int(year_part)
-                else:
-                    year = datetime.now().year
-                
-                return datetime(year, month_num, 1)
-        
+def validate_month_format(month_str):
+    """Validate and standardize month formats"""
+    if pd.isna(month_str):
         return datetime.now()
-    except:
-        return datetime.now()
+    
+    month_str = str(month_str).strip().upper()
+    
+    # Mapping bulan
+    month_map = {
+        'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+        'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12
+    }
+    
+    formats_to_try = ['%b-%Y', '%b-%y', '%B %Y', '%m/%Y', '%Y-%m']
+    
+    for fmt in formats_to_try:
+        try:
+            return datetime.strptime(month_str, fmt)
+        except:
+            continue
+    
+    # Fallback: cari bulan dalam string
+    for month_name, month_num in month_map.items():
+        if month_name in month_str:
+            # Cari tahun
+            year_part = month_str.replace(month_name, '').replace('-', '').replace(' ', '').strip()
+            if year_part and year_part.isdigit():
+                year = int('20' + year_part) if len(year_part) == 2 else int(year_part)
+            else:
+                year = datetime.now().year
+            
+            return datetime(year, month_num, 1)
+    
+    return datetime.now()
 
 def add_product_info_to_data(df, df_product):
-    """Add Product_Name, Brand, SKU_Tier from Product_Master to any dataframe"""
+    """Add Product_Name, Brand, SKU_Tier, Prices from Product_Master to any dataframe"""
     if df.empty or df_product.empty or 'SKU_ID' not in df.columns:
         return df
     
-    # Get product info from Product_Master
-    product_info = df_product[['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier']].copy()
+    # Get product info from Product_Master (including prices)
+    price_cols = ['Floor_Price', 'Net_Order_Price'] if 'Floor_Price' in df_product.columns and 'Net_Order_Price' in df_product.columns else []
+    
+    product_info_cols = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier', 'Status'] + price_cols
+    product_info_cols = [col for col in product_info_cols if col in df_product.columns]
+    
+    product_info = df_product[product_info_cols].copy()
     product_info = product_info.drop_duplicates(subset=['SKU_ID'])
     
     # Remove existing columns if they exist (except SKU_ID)
     cols_to_remove = []
-    for col in ['Product_Name', 'Brand', 'SKU_Tier']:
-        if col in df.columns:
+    for col in ['Product_Name', 'Brand', 'SKU_Tier', 'Status', 'Floor_Price', 'Net_Order_Price']:
+        if col in df.columns and col != 'SKU_ID':
             cols_to_remove.append(col)
     
     if cols_to_remove:
@@ -265,9 +324,9 @@ def add_product_info_to_data(df, df_product):
     df_result = pd.merge(df_temp, product_info, on='SKU_ID', how='left')
     return df_result
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, max_entries=3, show_spinner=False)
 def load_and_process_data(_client):
-    """Load dan proses semua data sekaligus"""
+    """Load dan proses semua data sekaligus dengan chunk processing"""
     
     gsheet_url = st.secrets["gsheet_url"]
     data = {}
@@ -278,6 +337,12 @@ def load_and_process_data(_client):
         df_product = pd.DataFrame(ws.get_all_records())
         df_product.columns = [col.strip().replace(' ', '_') for col in df_product.columns]
         
+        # Validate price columns
+        if 'Floor_Price' in df_product.columns:
+            df_product['Floor_Price'] = pd.to_numeric(df_product['Floor_Price'], errors='coerce').fillna(0)
+        if 'Net_Order_Price' in df_product.columns:
+            df_product['Net_Order_Price'] = pd.to_numeric(df_product['Net_Order_Price'], errors='coerce').fillna(0)
+        
         # Ensure Status column
         if 'Status' not in df_product.columns:
             df_product['Status'] = 'Active'
@@ -285,7 +350,7 @@ def load_and_process_data(_client):
         df_product_active = df_product[df_product['Status'].str.upper() == 'ACTIVE'].copy()
         active_skus = df_product_active['SKU_ID'].tolist()
         
-        # 2. SALES DATA
+        # 2. SALES DATA (Data lengkap sejak Jan 2024)
         ws_sales = _client.open_by_url(gsheet_url).worksheet("Sales")
         df_sales_raw = pd.DataFrame(ws_sales.get_all_records())
         df_sales_raw.columns = [col.strip() for col in df_sales_raw.columns]
@@ -309,13 +374,16 @@ def load_and_process_data(_client):
             )
             
             df_sales_long['Sales_Qty'] = pd.to_numeric(df_sales_long['Sales_Qty'], errors='coerce').fillna(0)
-            df_sales_long['Month'] = df_sales_long['Month_Label'].apply(parse_month_label)
+            df_sales_long['Month'] = df_sales_long['Month_Label'].apply(validate_month_format)
             
             # Filter active SKUs
             df_sales_long = df_sales_long[df_sales_long['SKU_ID'].isin(active_skus)]
             
-            # ADD PRODUCT INFO LOOKUP
+            # ADD PRODUCT INFO LOOKUP (with prices)
             df_sales_long = add_product_info_to_data(df_sales_long, df_product)
+            
+            # Sort by Month
+            df_sales_long = df_sales_long.sort_values('Month')
             
             data['sales'] = df_sales_long
         
@@ -340,7 +408,7 @@ def load_and_process_data(_client):
             )
             
             df_rofo_long['Forecast_Qty'] = pd.to_numeric(df_rofo_long['Forecast_Qty'], errors='coerce').fillna(0)
-            df_rofo_long['Month'] = df_rofo_long['Month_Label'].apply(parse_month_label)
+            df_rofo_long['Month'] = df_rofo_long['Month_Label'].apply(validate_month_format)
             df_rofo_long = df_rofo_long[df_rofo_long['SKU_ID'].isin(active_skus)]
             
             # ADD PRODUCT INFO LOOKUP
@@ -364,7 +432,7 @@ def load_and_process_data(_client):
             )
             
             df_po_long['PO_Qty'] = pd.to_numeric(df_po_long['PO_Qty'], errors='coerce').fillna(0)
-            df_po_long['Month'] = df_po_long['Month_Label'].apply(parse_month_label)
+            df_po_long['Month'] = df_po_long['Month_Label'].apply(validate_month_format)
             df_po_long = df_po_long[df_po_long['SKU_ID'].isin(active_skus)]
             
             # ADD PRODUCT INFO LOOKUP
@@ -392,10 +460,34 @@ def load_and_process_data(_client):
             df_stock = df_stock.groupby('SKU_ID')['Stock_Qty'].max().reset_index()
             df_stock = df_stock[df_stock['SKU_ID'].isin(active_skus)]
             
-            # ADD PRODUCT INFO LOOKUP
+            # ADD PRODUCT INFO LOOKUP (with prices)
             df_stock = add_product_info_to_data(df_stock, df_product)
             
             data['stock'] = df_stock
+        
+        # 6. ROFO ONWARDS DATA (untuk forecast generator)
+        try:
+            ws_rofo_onwards = _client.open_by_url(gsheet_url).worksheet("Rofo_onwards")
+            df_rofo_onwards_raw = pd.DataFrame(ws_rofo_onwards.get_all_records())
+            df_rofo_onwards_raw.columns = [col.strip().replace(' ', '_') for col in df_rofo_onwards_raw.columns]
+            
+            # Identify month columns
+            month_cols_onwards = []
+            for col in df_rofo_onwards_raw.columns:
+                if any(m in col.upper() for m in ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']):
+                    month_cols_onwards.append(col)
+            
+            # Convert month columns to numeric
+            for col in month_cols_onwards:
+                df_rofo_onwards_raw[col] = pd.to_numeric(df_rofo_onwards_raw[col], errors='coerce').fillna(0)
+            
+            data['rofo_onwards'] = df_rofo_onwards_raw
+            data['rofo_onwards_month_cols'] = month_cols_onwards
+            
+        except Exception as e:
+            st.warning(f"Rofo_onwards data not available: {str(e)}")
+            data['rofo_onwards'] = pd.DataFrame()
+            data['rofo_onwards_month_cols'] = []
         
         data['product'] = df_product
         data['product_active'] = df_product_active
@@ -405,6 +497,198 @@ def load_and_process_data(_client):
     except Exception as e:
         st.error(f"❌ Error loading data: {str(e)}")
         return {}
+
+# --- ====================================================== ---
+# ---                FINANCIAL FUNCTIONS                    ---
+# --- ====================================================== ---
+
+@st.cache_data(ttl=300)
+def calculate_financial_metrics_all(df_sales, df_product):
+    """Calculate all financial metrics from sales data"""
+    
+    if df_sales.empty or df_product.empty:
+        return pd.DataFrame()
+    
+    try:
+        # Check if price columns exist
+        required_price_cols = ['Floor_Price', 'Net_Order_Price']
+        price_cols_exist = all(col in df_product.columns for col in required_price_cols)
+        
+        if not price_cols_exist:
+            st.warning("⚠️ Price columns missing in Product Master")
+            return pd.DataFrame()
+        
+        # Ensure sales data has product info with prices
+        if 'Floor_Price' not in df_sales.columns or 'Net_Order_Price' not in df_sales.columns:
+            df_sales = add_product_info_to_data(df_sales, df_product)
+        
+        # Fill missing prices
+        df_sales['Floor_Price'] = df_sales['Floor_Price'].fillna(0)
+        df_sales['Net_Order_Price'] = df_sales['Net_Order_Price'].fillna(0)
+        
+        # Calculate financial metrics
+        df_sales['Revenue'] = df_sales['Sales_Qty'] * df_sales['Floor_Price']
+        df_sales['Cost'] = df_sales['Sales_Qty'] * df_sales['Net_Order_Price']
+        df_sales['Gross_Margin'] = df_sales['Revenue'] - df_sales['Cost']
+        df_sales['Margin_Percentage'] = np.where(
+            df_sales['Revenue'] > 0,
+            (df_sales['Gross_Margin'] / df_sales['Revenue'] * 100),
+            0
+        )
+        
+        # Add additional metrics
+        df_sales['Avg_Selling_Price'] = np.where(
+            df_sales['Sales_Qty'] > 0,
+            df_sales['Revenue'] / df_sales['Sales_Qty'],
+            0
+        )
+        
+        return df_sales
+        
+    except Exception as e:
+        st.error(f"Financial metrics calculation error: {str(e)}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=300)
+def calculate_inventory_financial(df_stock, df_product):
+    """Calculate inventory financial value"""
+    
+    if df_stock.empty or df_product.empty:
+        return pd.DataFrame()
+    
+    try:
+        # Check price columns
+        if 'Floor_Price' not in df_product.columns or 'Net_Order_Price' not in df_product.columns:
+            return pd.DataFrame()
+        
+        # Ensure stock data has prices
+        if 'Floor_Price' not in df_stock.columns or 'Net_Order_Price' not in df_stock.columns:
+            df_stock = add_product_info_to_data(df_stock, df_product)
+        
+        # Fill missing prices
+        df_stock['Floor_Price'] = df_stock['Floor_Price'].fillna(0)
+        df_stock['Net_Order_Price'] = df_stock['Net_Order_Price'].fillna(0)
+        
+        # Calculate inventory values
+        df_stock['Value_at_Cost'] = df_stock['Stock_Qty'] * df_stock['Net_Order_Price']
+        df_stock['Value_at_Retail'] = df_stock['Stock_Qty'] * df_stock['Floor_Price']
+        df_stock['Potential_Margin'] = df_stock['Value_at_Retail'] - df_stock['Value_at_Cost']
+        df_stock['Margin_Percentage'] = np.where(
+            df_stock['Value_at_Retail'] > 0,
+            (df_stock['Potential_Margin'] / df_stock['Value_at_Retail'] * 100),
+            0
+        )
+        
+        return df_stock
+        
+    except Exception as e:
+        st.error(f"Inventory financial calculation error: {str(e)}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=300)
+def calculate_seasonality(df_financial):
+    """Calculate seasonal patterns from financial data"""
+    
+    if df_financial.empty:
+        return pd.DataFrame()
+    
+    try:
+        # Add month and year columns
+        df_financial['Year'] = df_financial['Month'].dt.year
+        df_financial['Month_Num'] = df_financial['Month'].dt.month
+        df_financial['Month_Name'] = df_financial['Month'].dt.strftime('%b')
+        
+        # Group by month across years
+        seasonal_pattern = df_financial.groupby(['Month_Num', 'Month_Name']).agg({
+            'Revenue': 'mean',
+            'Gross_Margin': 'mean',
+            'Sales_Qty': 'mean'
+        }).reset_index()
+        
+        # Calculate seasonal indices
+        overall_avg_revenue = seasonal_pattern['Revenue'].mean()
+        seasonal_pattern['Seasonal_Index_Revenue'] = seasonal_pattern['Revenue'] / overall_avg_revenue
+        
+        overall_avg_margin = seasonal_pattern['Gross_Margin'].mean()
+        seasonal_pattern['Seasonal_Index_Margin'] = seasonal_pattern['Gross_Margin'] / overall_avg_margin
+        
+        # Classify seasons
+        conditions = [
+            seasonal_pattern['Seasonal_Index_Revenue'] >= 1.2,
+            (seasonal_pattern['Seasonal_Index_Revenue'] >= 0.9) & (seasonal_pattern['Seasonal_Index_Revenue'] < 1.2),
+            seasonal_pattern['Seasonal_Index_Revenue'] < 0.9
+        ]
+        choices = ['Peak Season', 'Normal Season', 'Low Season']
+        
+        seasonal_pattern['Season_Type'] = np.select(conditions, choices, default='Normal Season')
+        
+        return seasonal_pattern.sort_values('Month_Num')
+        
+    except Exception as e:
+        st.error(f"Seasonality calculation error: {str(e)}")
+        return pd.DataFrame()
+
+def calculate_eoq(demand, order_cost, holding_cost_per_unit):
+    """Calculate Economic Order Quantity"""
+    if demand <= 0 or order_cost <= 0 or holding_cost_per_unit <= 0:
+        return 0
+    
+    eoq = math.sqrt((2 * demand * order_cost) / holding_cost_per_unit)
+    return round(eoq)
+
+def calculate_forecast_bias(df_forecast, df_po):
+    """Calculate forecast bias (systematic over/under forecasting)"""
+    
+    if df_forecast.empty or df_po.empty:
+        return {}
+    
+    try:
+        # Get common months
+        forecast_months = sorted(df_forecast['Month'].unique())
+        po_months = sorted(df_po['Month'].unique())
+        common_months = sorted(set(forecast_months) & set(po_months))
+        
+        if not common_months:
+            return {}
+        
+        bias_results = []
+        
+        for month in common_months:
+            df_f_month = df_forecast[df_forecast['Month'] == month]
+            df_p_month = df_po[df_po['Month'] == month]
+            
+            # Merge forecast and PO
+            df_merged = pd.merge(
+                df_f_month[['SKU_ID', 'Forecast_Qty']],
+                df_p_month[['SKU_ID', 'PO_Qty']],
+                on='SKU_ID',
+                how='inner'
+            )
+            
+            # Calculate bias
+            df_merged['Bias'] = df_merged['PO_Qty'] - df_merged['Forecast_Qty']
+            df_merged['Bias_Percentage'] = np.where(
+                df_merged['Forecast_Qty'] > 0,
+                (df_merged['Bias'] / df_merged['Forecast_Qty'] * 100),
+                0
+            )
+            
+            avg_bias = df_merged['Bias'].mean()
+            avg_bias_pct = df_merged['Bias_Percentage'].mean()
+            
+            bias_results.append({
+                'Month': month,
+                'Avg_Bias': avg_bias,
+                'Avg_Bias_Percentage': avg_bias_pct,
+                'Over_Forecast_SKUs': len(df_merged[df_merged['Bias'] > 0]),
+                'Under_Forecast_SKUs': len(df_merged[df_merged['Bias'] < 0])
+            })
+        
+        return pd.DataFrame(bias_results)
+        
+    except Exception as e:
+        st.error(f"Forecast bias calculation error: {str(e)}")
+        return pd.DataFrame()
 
 # --- ====================================================== ---
 # ---                ANALYTICS FUNCTIONS                    ---
@@ -432,7 +716,7 @@ def calculate_monthly_performance(df_forecast, df_po, df_product):
             # Get data for this month - FILTER HANYA Forecast_Qty > 0
             df_forecast_month = df_forecast[
                 (df_forecast['Month'] == month) & 
-                (df_forecast['Forecast_Qty'] > 0)  # INI PERUBAHAN PENTING!
+                (df_forecast['Forecast_Qty'] > 0)
             ].copy()
             
             df_po_month = df_po[df_po['Month'] == month].copy()
@@ -445,7 +729,7 @@ def calculate_monthly_performance(df_forecast, df_po, df_product):
                 df_forecast_month,
                 df_po_month,
                 on=['SKU_ID'],
-                how='inner',  # INNER JOIN untuk dapatkan SKU yang ada di kedua dataset
+                how='inner',
                 suffixes=('_forecast', '_po')
             )
             
@@ -633,7 +917,7 @@ def calculate_sales_vs_forecast_po(df_sales, df_forecast, df_po, df_product):
         df_forecast = add_product_info_to_data(df_forecast, df_product)
         df_po = add_product_info_to_data(df_po, df_product)
         
-        # FILTER HANYA ACTIVE SKUS - TAMBAH INI
+        # FILTER HANYA ACTIVE SKUS
         if 'Status' in df_product.columns:
             active_skus = df_product[df_product['Status'].str.upper() == 'ACTIVE']['SKU_ID'].tolist()
             
@@ -662,7 +946,7 @@ def calculate_sales_vs_forecast_po(df_sales, df_forecast, df_po, df_product):
         df_forecast_month = df_forecast[df_forecast['Month'] == last_month].copy()
         df_po_month = df_po[df_po['Month'] == last_month].copy()
         
-        # Filter hanya SKU dengan Forecast_Qty > 0 - TAMBAH INI JUGA
+        # Filter hanya SKU dengan Forecast_Qty > 0
         df_forecast_month = df_forecast_month[df_forecast_month['Forecast_Qty'] > 0]
         
         # Merge all data
@@ -670,7 +954,7 @@ def calculate_sales_vs_forecast_po(df_sales, df_forecast, df_po, df_product):
             df_sales_month[['SKU_ID', 'Sales_Qty']],
             df_forecast_month[['SKU_ID', 'Forecast_Qty']],
             on='SKU_ID',
-            how='inner'  # Hanya SKU yang ada di kedua dataset
+            how='inner'
         )
         
         df_merged = pd.merge(
@@ -722,7 +1006,7 @@ def calculate_sales_vs_forecast_po(df_sales, df_forecast, df_po, df_product):
             'avg_forecast_deviation': avg_forecast_deviation,
             'avg_po_deviation': avg_po_deviation,
             'total_skus_compared': len(df_merged),
-            'active_skus_only': True  # TAMBAH FLAG INI
+            'active_skus_only': True
         }
         
         return results
@@ -821,6 +1105,90 @@ def calculate_brand_performance(df_forecast, df_po, df_product):
         st.error(f"Brand performance calculation error: {str(e)}")
         return pd.DataFrame()
 
+def identify_profitability_segments(df_financial):
+    """Segment SKUs by profitability"""
+    
+    if df_financial.empty:
+        return pd.DataFrame()
+    
+    try:
+        sku_profitability = df_financial.groupby(['SKU_ID', 'Product_Name', 'Brand']).agg({
+            'Revenue': 'sum',
+            'Gross_Margin': 'sum',
+            'Sales_Qty': 'sum'
+        }).reset_index()
+        
+        # Calculate metrics
+        sku_profitability['Avg_Margin_Per_SKU'] = sku_profitability['Gross_Margin'] / sku_profitability['Sales_Qty']
+        sku_profitability['Margin_Percentage'] = np.where(
+            sku_profitability['Revenue'] > 0,
+            (sku_profitability['Gross_Margin'] / sku_profitability['Revenue'] * 100),
+            0
+        )
+        
+        # Segment by margin percentage
+        conditions = [
+            (sku_profitability['Margin_Percentage'] >= 40),
+            (sku_profitability['Margin_Percentage'] >= 20) & (sku_profitability['Margin_Percentage'] < 40),
+            (sku_profitability['Margin_Percentage'] < 20) & (sku_profitability['Margin_Percentage'] > 0),
+            (sku_profitability['Margin_Percentage'] <= 0)
+        ]
+        choices = ['High Margin (>40%)', 'Medium Margin (20-40%)', 'Low Margin (<20%)', 'Negative Margin']
+        
+        sku_profitability['Margin_Segment'] = np.select(conditions, choices, default='Unknown')
+        
+        return sku_profitability.sort_values('Gross_Margin', ascending=False)
+        
+    except Exception as e:
+        st.error(f"Profitability segmentation error: {str(e)}")
+        return pd.DataFrame()
+
+def validate_data_quality(df, df_name):
+    """Comprehensive data quality validation"""
+    
+    checks = {}
+    
+    if df.empty:
+        checks['Empty Dataset'] = '❌ Dataset kosong'
+        return checks
+    
+    # Basic checks
+    checks['Total Rows'] = f"📊 {len(df):,} rows"
+    checks['Total Columns'] = f"📋 {len(df.columns)} columns"
+    
+    # Missing values
+    missing_values = df.isnull().sum().sum()
+    missing_pct = (missing_values / (len(df) * len(df.columns)) * 100)
+    checks['Missing Values'] = f"⚠️ {missing_values:,} ({missing_pct:.1f}%)" if missing_values > 0 else f"✅ {missing_values:,}"
+    
+    # Duplicates
+    duplicates = df.duplicated().sum()
+    checks['Duplicate Rows'] = f"⚠️ {duplicates:,}" if duplicates > 0 else f"✅ {duplicates:,}"
+    
+    # Zero values (for numeric columns)
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    if len(numeric_cols) > 0:
+        zero_values = (df[numeric_cols] == 0).sum().sum()
+        zero_pct = (zero_values / (len(df) * len(numeric_cols)) * 100)
+        checks['Zero Values'] = f"📉 {zero_values:,} ({zero_pct:.1f}%)"
+    
+    # Negative values
+    if len(numeric_cols) > 0:
+        negative_values = (df[numeric_cols] < 0).sum().sum()
+        if negative_values > 0:
+            checks['Negative Values'] = f"❌ {negative_values:,}"
+    
+    # Date range (if Month column exists)
+    if 'Month' in df.columns:
+        try:
+            min_date = df['Month'].min()
+            max_date = df['Month'].max()
+            checks['Date Range'] = f"📅 {min_date.strftime('%b %Y')} - {max_date.strftime('%b %Y')}"
+        except:
+            pass
+    
+    return checks
+
 # --- ====================================================== ---
 # ---                DASHBOARD INITIALIZATION               ---
 # --- ====================================================== ---
@@ -842,6 +1210,8 @@ with st.spinner('🔄 Loading and processing data from Google Sheets...'):
     df_forecast = all_data.get('forecast', pd.DataFrame())
     df_po = all_data.get('po', pd.DataFrame())
     df_stock = all_data.get('stock', pd.DataFrame())
+    df_rofo_onwards = all_data.get('rofo_onwards', pd.DataFrame())
+    rofo_onwards_month_cols = all_data.get('rofo_onwards_month_cols', [])
 
 # Calculate metrics
 monthly_performance = calculate_monthly_performance(df_forecast, df_po, df_product)
@@ -849,13 +1219,20 @@ last_3_months_performance = get_last_3_months_performance(monthly_performance)
 inventory_metrics = calculate_inventory_metrics_with_3month_avg(df_stock, df_sales, df_product)
 sales_vs_forecast = calculate_sales_vs_forecast_po(df_sales, df_forecast, df_po, df_product)
 
+# Calculate financial metrics
+df_financial = calculate_financial_metrics_all(df_sales, df_product)
+df_inventory_financial = calculate_inventory_financial(df_stock, df_product)
+seasonal_pattern = calculate_seasonality(df_financial) if not df_financial.empty else pd.DataFrame()
+forecast_bias = calculate_forecast_bias(df_forecast, df_po)
+profitability_segments = identify_profitability_segments(df_financial) if not df_financial.empty else pd.DataFrame()
+
 # --- SIDEBAR ---
 with st.sidebar:
     st.markdown("### ⚙️ Dashboard Controls")
     
     col_sb1, col_sb2 = st.columns(2)
     with col_sb1:
-        if st.button("🔄 Refresh Data", use_container_width=True):
+        if st.button("🔄 Refresh Data", use_container_width=True, type="primary"):
             st.cache_data.clear()
             st.rerun()
     
@@ -878,6 +1255,19 @@ with st.sidebar:
         accuracy = monthly_performance[last_month]['accuracy']
         st.metric("Latest Accuracy", f"{accuracy:.1f}%")
     
+    # Financial metrics in sidebar
+    if not df_financial.empty:
+        st.markdown("---")
+        st.markdown("### 💰 Financial Overview")
+        
+        total_revenue = df_financial['Revenue'].sum()
+        total_margin = df_financial['Gross_Margin'].sum()
+        avg_margin_pct = (total_margin / total_revenue * 100) if total_revenue > 0 else 0
+        
+        st.metric("Total Revenue", f"${total_revenue:,.0f}")
+        st.metric("Total Margin", f"${total_margin:,.0f}")
+        st.metric("Avg Margin %", f"{avg_margin_pct:.1f}%")
+    
     st.markdown("---")
     
     # Threshold Settings
@@ -891,6 +1281,37 @@ with st.sidebar:
     st.markdown("### 📦 Inventory Thresholds")
     low_stock_threshold = st.slider("Low Stock (months)", 0.0, 2.0, 0.8, 0.1)
     high_stock_threshold = st.slider("High Stock (months)", 1.0, 6.0, 1.5, 0.1)
+    
+    # Financial Thresholds
+    st.markdown("---")
+    st.markdown("### 💰 Financial Thresholds")
+    high_margin_threshold = st.slider("High Margin Threshold (%)", 0, 100, 40)
+    low_margin_threshold = st.slider("Low Margin Threshold (%)", 0, 100, 20)
+    
+    # Dark mode toggle
+    st.markdown("---")
+    dark_mode = st.checkbox("🌙 Dark Mode", value=False)
+    if dark_mode:
+        st.markdown("""
+        <style>
+            .stApp { background-color: #0E1117; color: white; }
+            .stDataFrame { background-color: #1E1E1E; }
+        </style>
+        """, unsafe_allow_html=True)
+
+# Data quality check
+if 'show_stats' in st.session_state and st.session_state.show_stats:
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 🔍 Data Quality Check")
+    
+    for df_name, df in [("Product", df_product), ("Sales", df_sales), 
+                       ("Forecast", df_forecast), ("PO", df_po), 
+                       ("Stock", df_stock), ("Financial", df_financial)]:
+        if not df.empty:
+            checks = validate_data_quality(df, df_name)
+            with st.sidebar.expander(f"{df_name} Data"):
+                for check_name, check_result in checks.items():
+                    st.write(f"{check_name}: {check_result}")
 
 # --- MAIN DASHBOARD ---
 
@@ -1534,14 +1955,15 @@ if monthly_performance:
 st.divider()
 
 # --- MAIN TABS ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📈 Monthly Performance Details",
     "🏷️ Forecast Performance by Brand & Tier Analysis",
     "📦 Inventory Analysis",
     "🔍 SKU Evaluation",
     "📈 Sales & Forecast Analysis",
     "📋 Data Explorer",
-    "🔮 Forecast Generator"  # <-- TAB BARU INI
+    "🔮 Forecast Generator",
+    "💰 Profitability Analysis"  # <-- NEW TAB 8
 ])
 
 # --- TAB 1: MONTHLY PERFORMANCE DETAILS ---
@@ -1579,6 +2001,30 @@ with tab1:
             use_container_width=True,
             height=400
         )
+        
+        # Add forecast bias analysis if available
+        if not forecast_bias.empty:
+            st.divider()
+            st.subheader("📉 Forecast Bias Analysis")
+            
+            fig_bias = go.Figure()
+            fig_bias.add_trace(go.Bar(
+                x=forecast_bias['Month'].dt.strftime('%b-%Y'),
+                y=forecast_bias['Avg_Bias_Percentage'],
+                name='Forecast Bias %',
+                marker_color=forecast_bias['Avg_Bias_Percentage'].apply(
+                    lambda x: '#4CAF50' if x >= -10 and x <= 10 else '#FF9800' if x >= -20 and x <= 20 else '#F44336'
+                )
+            ))
+            
+            fig_bias.update_layout(
+                height=300,
+                title='Monthly Forecast Bias (Positive = Over-forecast, Negative = Under-forecast)',
+                xaxis_title='Month',
+                yaxis_title='Bias %'
+            )
+            
+            st.plotly_chart(fig_bias, use_container_width=True)
 
 # --- TAB 2: FORECAST PERFORMANCE BY BRAND & TIER ANALYSIS ---
 with tab2:
@@ -1640,6 +2086,48 @@ with tab2:
                 </div>
             </div>
             """, unsafe_allow_html=True)
+        
+        # ================ FINANCIAL ANALYSIS PER BRAND ================
+        st.divider()
+        st.subheader("💰 Brand Financial Performance")
+        
+        if not df_financial.empty:
+            brand_financial = df_financial.groupby('Brand').agg({
+                'Revenue': 'sum',
+                'Gross_Margin': 'sum',
+                'Sales_Qty': 'sum'
+            }).reset_index()
+            
+            brand_financial['Margin_Percentage'] = np.where(
+                brand_financial['Revenue'] > 0,
+                (brand_financial['Gross_Margin'] / brand_financial['Revenue'] * 100),
+                0
+            )
+            
+            brand_financial = brand_financial.sort_values('Gross_Margin', ascending=False)
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.dataframe(
+                    brand_financial.head(10),
+                    column_config={
+                        "Revenue": st.column_config.NumberColumn("Revenue", format="$ %.0f"),
+                        "Gross_Margin": st.column_config.NumberColumn("Gross Margin", format="$ %.0f"),
+                        "Margin_Percentage": st.column_config.ProgressColumn("Margin %", format="%.1f%%", min_value=0, max_value=100)
+                    },
+                    use_container_width=True
+                )
+            
+            with col2:
+                # Chart brand profitability
+                fig = px.bar(brand_financial.head(10), x='Brand', y='Margin_Percentage',
+                            title='Top 10 Brands by Margin %',
+                            color='Margin_Percentage',
+                            color_continuous_scale='RdYlGn')
+                
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
         
         # ================ DATA TABLE SECTION ================
         st.divider()
@@ -2243,6 +2731,74 @@ with tab3:
                 </div>
                 """, unsafe_allow_html=True)
         
+        # ================ INVENTORY FINANCIAL VALUE ================
+        st.divider()
+        st.subheader("💵 Inventory Financial Value")
+        
+        if not df_inventory_financial.empty:
+            total_cost_value = df_inventory_financial['Value_at_Cost'].sum()
+            total_retail_value = df_inventory_financial['Value_at_Retail'].sum()
+            total_potential_margin = df_inventory_financial['Potential_Margin'].sum()
+            avg_margin_pct = (total_potential_margin / total_retail_value * 100) if total_retail_value > 0 else 0
+            
+            col_fin1, col_fin2, col_fin3, col_fin4 = st.columns(4)
+            
+            with col_fin1:
+                st.metric("Inventory @ Cost", f"${total_cost_value:,.0f}")
+            
+            with col_fin2:
+                st.metric("Inventory @ Retail", f"${total_retail_value:,.0f}")
+            
+            with col_fin3:
+                st.metric("Potential Margin", f"${total_potential_margin:,.0f}")
+            
+            with col_fin4:
+                st.metric("Avg Margin %", f"{avg_margin_pct:.1f}%")
+            
+            # High value inventory items
+            high_value_items = df_inventory_financial.sort_values('Value_at_Cost', ascending=False).head(10)
+            
+            st.markdown("#### 📊 Top 10 Highest Value Inventory Items")
+            st.dataframe(
+                high_value_items[['SKU_ID', 'Product_Name', 'Brand', 'Stock_Qty', 
+                                'Value_at_Cost', 'Value_at_Retail', 'Potential_Margin']],
+                column_config={
+                    "Value_at_Cost": st.column_config.NumberColumn("Value @ Cost", format="$ %.0f"),
+                    "Value_at_Retail": st.column_config.NumberColumn("Value @ Retail", format="$ %.0f"),
+                    "Potential_Margin": st.column_config.NumberColumn("Potential Margin", format="$ %.0f")
+                },
+                use_container_width=True
+            )
+            
+            # Inventory risk analysis
+            st.divider()
+            st.subheader("⚠️ Inventory Risk Analysis")
+            
+            # Identify high-risk items (high value + slow moving)
+            if 'inventory_df' in inventory_metrics:
+                df_inv_risk = pd.merge(
+                    inventory_metrics['inventory_df'][['SKU_ID', 'Cover_Months', 'Avg_Monthly_Sales_3M', 'Inventory_Status']],
+                    df_inventory_financial[['SKU_ID', 'Value_at_Cost', 'Value_at_Retail']],
+                    on='SKU_ID',
+                    how='left'
+                )
+                
+                # Flag high risk items
+                high_risk = df_inv_risk[
+                    (df_inv_risk['Cover_Months'] > 3) &  # Slow moving (>3 months cover)
+                    (df_inv_risk['Value_at_Cost'] > 1000)  # High value (>$1000)
+                ].sort_values('Value_at_Cost', ascending=False)
+                
+                if not high_risk.empty:
+                    st.warning(f"⚠️ **{len(high_risk)} high-value slow-moving items detected**")
+                    st.dataframe(
+                        high_risk[['SKU_ID', 'Product_Name', 'Cover_Months', 
+                                 'Value_at_Cost', 'Inventory_Status']],
+                        use_container_width=True
+                    )
+                else:
+                    st.success("✅ No high-risk inventory items detected")
+        
         st.divider()
         # Detailed Inventory Table
         st.subheader("📋 Detailed Inventory Status")
@@ -2389,6 +2945,14 @@ with tab4:
             inventory_data = inventory_metrics['inventory_df'][['SKU_ID', 'Stock_Qty', 'Avg_Monthly_Sales_3M', 'Cover_Months']]
             last_month_data = pd.merge(last_month_data, inventory_data, on='SKU_ID', how='left')
         
+        # Add financial data if available
+        if not df_financial.empty:
+            # Get financial metrics for last month
+            financial_last_month = df_financial[df_financial['Month'] == last_month]
+            if not financial_last_month.empty:
+                financial_metrics = financial_last_month[['SKU_ID', 'Revenue', 'Gross_Margin', 'Margin_Percentage']]
+                last_month_data = pd.merge(last_month_data, financial_metrics, on='SKU_ID', how='left')
+        
         # Create comprehensive evaluation table
         # Filter by SKU
         sku_filter = st.text_input("🔍 Filter by SKU ID or Product Name", "")
@@ -2426,6 +2990,10 @@ with tab4:
                     'Forecast_Qty', 'PO_Qty', 'PO_Rofo_Ratio',
                     'Stock_Qty', 'Avg_Monthly_Sales_3M', 'Cover_Months']
         
+        # Add financial columns if available
+        if 'Revenue' in filtered_eval_df.columns:
+            eval_cols.extend(['Revenue', 'Gross_Margin', 'Margin_Percentage'])
+        
         # Add sales columns
         eval_cols.extend(sales_cols_sorted)
         
@@ -2448,6 +3016,16 @@ with tab4:
         if 'Avg_Monthly_Sales_3M' in eval_df.columns:
             eval_df['Avg_Monthly_Sales_3M'] = eval_df['Avg_Monthly_Sales_3M'].apply(lambda x: f"{x:.0f}" if pd.notnull(x) else "0")
         
+        # Format financial columns
+        if 'Revenue' in eval_df.columns:
+            eval_df['Revenue'] = eval_df['Revenue'].apply(lambda x: f"${x:,.0f}" if pd.notnull(x) else "$0")
+        
+        if 'Gross_Margin' in eval_df.columns:
+            eval_df['Gross_Margin'] = eval_df['Gross_Margin'].apply(lambda x: f"${x:,.0f}" if pd.notnull(x) else "$0")
+        
+        if 'Margin_Percentage' in eval_df.columns:
+            eval_df['Margin_Percentage'] = eval_df['Margin_Percentage'].apply(lambda x: f"{x:.1f}%" if pd.notnull(x) else "0%")
+        
         # Format sales columns
         for col in sales_cols_sorted:
             if col in eval_df.columns:
@@ -2464,7 +3042,10 @@ with tab4:
             'PO_Rofo_Ratio': 'PO/Rofo %',
             'Stock_Qty': 'Stock',
             'Avg_Monthly_Sales_3M': 'Avg Sales (L3M)',
-            'Cover_Months': 'Cover (Months)'
+            'Cover_Months': 'Cover (Months)',
+            'Revenue': 'Revenue',
+            'Gross_Margin': 'Gross Margin',
+            'Margin_Percentage': 'Margin %'
         }
         
         # Add sales columns to rename dict
@@ -2476,6 +3057,10 @@ with tab4:
         # Reorder columns
         column_order = ['SKU ID', 'Product Name', 'Brand', 'Tier', 'Forecast', 'PO', 
                        'PO/Rofo %', 'Stock', 'Avg Sales (L3M)', 'Cover (Months)']
+        
+        # Tambahkan financial columns
+        if 'Revenue' in eval_df.columns:
+            column_order.extend(['Revenue', 'Gross Margin', 'Margin %'])
         
         # Tambahkan sales columns ke urutan
         for col in sales_cols_sorted:
@@ -2782,6 +3367,14 @@ with tab4:
                             elif po_vs_forecast > 120:
                                 recommendations.append("⚠️ **Reduce Over-PO**: PO significantly above forecast")
                             
+                            # Financial recommendations (if financial data available)
+                            if 'Margin_Percentage' in sku_details:
+                                margin = sku_details.get('Margin_Percentage', 0)
+                                if margin < 20:
+                                    recommendations.append("💰 **Low Margin Alert**: Margin below 20%")
+                                elif margin > 40:
+                                    recommendations.append("💰 **High Margin Opportunity**: Excellent margin performance")
+                            
                             if recommendations:
                                 for rec in recommendations:
                                     st.write(f"- {rec}")
@@ -3055,7 +3648,9 @@ with tab6:
         "Sales Data": df_sales,
         "Forecast Data": df_forecast,
         "PO Data": df_po,
-        "Stock Data": df_stock
+        "Stock Data": df_stock,
+        "Financial Data": df_financial,
+        "Inventory Financial": df_inventory_financial
     }
     
     selected_dataset = st.selectbox("Select Dataset", list(dataset_options.keys()))
@@ -3106,45 +3701,7 @@ with tab7:
     st.subheader("🔍 Rofo Validation & Analysis Dashboard")
     st.markdown("**Validate and analyze your Excel-calculated Rofo forecasts**")
     
-    # ================ LOAD ROFO ONWARDS DATA ================
-    @st.cache_data(ttl=300)
-    def load_rofo_onwards_data(_client):
-        """Load Rofo_onwards data from Google Sheets"""
-        
-        try:
-            gsheet_url = st.secrets["gsheet_url"]
-            ws = _client.open_by_url(gsheet_url).worksheet("Rofo_onwards")
-            df_rofo = pd.DataFrame(ws.get_all_records())
-            
-            # Clean column names
-            df_rofo.columns = [col.strip().replace(' ', '_') for col in df_rofo.columns]
-            
-            # Identify month columns (format like Jan-26, Feb-26, etc.)
-            month_cols = []
-            for col in df_rofo.columns:
-                if any(month in col.upper() for month in 
-                      ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
-                       'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']):
-                    month_cols.append(col)
-            
-            # Convert month columns to numeric
-            for col in month_cols:
-                df_rofo[col] = pd.to_numeric(df_rofo[col], errors='coerce').fillna(0)
-            
-            # Add product info if not present
-            if 'Product_Name' not in df_rofo.columns and 'Product_Master' in locals():
-                df_rofo = add_product_info_to_data(df_rofo, df_product)
-            
-            return df_rofo, month_cols
-            
-        except Exception as e:
-            st.error(f"❌ Error loading Rofo_onwards data: {str(e)}")
-            return pd.DataFrame(), []
-    
-    # Load rofo data
-    df_rofo, month_cols = load_rofo_onwards_data(client)
-    
-    if df_rofo.empty:
+    if df_rofo_onwards.empty:
         st.warning("⚠️ No Rofo_onwards data found. Please check your Google Sheet.")
         st.info("""
         **Required sheet name:** `Rofo_onwards`
@@ -3159,651 +3716,418 @@ with tab7:
         **Optional columns:**
         - Notes (for any comments)
         """)
-        st.stop()
-    
-    # ================ DATA VALIDATION CHECKS ================
-    st.divider()
-    st.subheader("✅ Data Quality Check")
-    
-    validation_results = []
-    
-    # Check 1: Required columns
-    required_cols = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier']
-    missing_cols = [col for col in required_cols if col not in df_rofo.columns]
-    
-    if missing_cols:
-        validation_results.append({
-            'Check': 'Required Columns',
-            'Status': '❌ FAILED',
-            'Details': f"Missing: {', '.join(missing_cols)}"
-        })
     else:
-        validation_results.append({
-            'Check': 'Required Columns',
-            'Status': '✅ PASSED',
-            'Details': f"All required columns present"
-        })
-    
-    # Check 2: Month columns
-    if month_cols:
-        validation_results.append({
-            'Check': 'Month Columns',
-            'Status': '✅ PASSED',
-            'Details': f"Found {len(month_cols)} month columns"
-        })
-    else:
-        validation_results.append({
-            'Check': 'Month Columns',
-            'Status': '❌ FAILED',
-            'Details': "No month columns found (expected Jan-26, Feb-26, etc.)"
-        })
-    
-    # Check 3: SKU coverage
-    if 'SKU_ID' in df_rofo.columns:
-        total_skus = len(df_rofo)
-        active_skus = len(df_product[df_product['Status'].str.upper() == 'ACTIVE']) if 'df_product' in locals() else 0
+        # ================ DATA VALIDATION CHECKS ================
+        st.divider()
+        st.subheader("✅ Data Quality Check")
         
-        if active_skus > 0:
-            coverage_pct = (total_skus / active_skus) * 100
-            validation_results.append({
-                'Check': 'SKU Coverage',
-                'Status': '⚠️ CHECK' if coverage_pct < 80 else '✅ GOOD',
-                'Details': f"{total_skus} SKUs ({coverage_pct:.1f}% of {active_skus} active)"
-            })
-    
-    # Check 4: Zero values
-    if month_cols:
-        zero_counts = (df_rofo[month_cols] == 0).sum().sum()
-        total_cells = len(df_rofo) * len(month_cols)
-        zero_pct = (zero_counts / total_cells) * 100
+        validation_results = []
         
-        status = '✅ GOOD' if zero_pct < 20 else '⚠️ WARNING' if zero_pct < 50 else '❌ HIGH'
-        validation_results.append({
-            'Check': 'Zero Values',
-            'Status': status,
-            'Details': f"{zero_counts:,} zero cells ({zero_pct:.1f}% of total)"
-        })
-    
-    # Check 5: Negative values
-    if month_cols:
-        negative_counts = (df_rofo[month_cols] < 0).sum().sum()
-        if negative_counts > 0:
+        # Check 1: Required columns
+        required_cols = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier']
+        missing_cols = [col for col in required_cols if col not in df_rofo_onwards.columns]
+        
+        if missing_cols:
             validation_results.append({
-                'Check': 'Negative Values',
+                'Check': 'Required Columns',
                 'Status': '❌ FAILED',
-                'Details': f"{negative_counts:,} negative values found"
+                'Details': f"Missing: {', '.join(missing_cols)}"
             })
         else:
             validation_results.append({
-                'Check': 'Negative Values',
+                'Check': 'Required Columns',
                 'Status': '✅ PASSED',
-                'Details': "No negative values"
+                'Details': f"All required columns present"
             })
-    
-    # Display validation results
-    validation_df = pd.DataFrame(validation_results)
-    st.dataframe(
-        validation_df,
-        column_config={
-            "Status": st.column_config.TextColumn(
-                "Status",
-                width="small"
-            ),
-            "Details": st.column_config.TextColumn(
-                "Details",
-                width="large"
-            )
-        },
-        use_container_width=True,
-        hide_index=True
-    )
-    
-    # ================ ROFO SUMMARY DASHBOARD ================
-    st.divider()
-    st.subheader("📊 Rofo Overview")
-    
-    # Summary metrics
-    if month_cols:
-        # Calculate totals by month
-        monthly_totals = df_rofo[month_cols].sum()
-        monthly_totals_df = pd.DataFrame({
-            'Month': monthly_totals.index,
-            'Total_Rofo': monthly_totals.values
-        })
         
-        # Format month names for sorting
-        def parse_rofo_month(month_str):
-            try:
-                month_part, year_part = month_str.split('-')
-                month_num = datetime.strptime(month_part, '%b').month
-                year = 2000 + int(year_part) if int(year_part) < 100 else int(year_part)
-                return datetime(year, month_num, 1)
-            except:
-                return datetime.now()
-        
-        monthly_totals_df['Month_Date'] = monthly_totals_df['Month'].apply(parse_rofo_month)
-        monthly_totals_df = monthly_totals_df.sort_values('Month_Date')
-        
-        # Display metrics
-        col_metric1, col_metric2, col_metric3, col_metric4 = st.columns(4)
-        
-        with col_metric1:
-            total_rofo = monthly_totals_df['Total_Rofo'].sum()
-            st.metric("Total Rofo Volume", f"{total_rofo:,.0f}")
-        
-        with col_metric2:
-            avg_monthly = monthly_totals_df['Total_Rofo'].mean()
-            st.metric("Avg Monthly", f"{avg_monthly:,.0f}")
-        
-        with col_metric3:
-            peak_month = monthly_totals_df.loc[monthly_totals_df['Total_Rofo'].idxmax()]
-            st.metric("Peak Month", f"{peak_month['Total_Rofo']:,.0f}")
-            st.caption(peak_month['Month'])
-        
-        with col_metric4:
-            growth_6m = 0
-            if len(monthly_totals_df) >= 7:
-                first_half = monthly_totals_df.head(6)['Total_Rofo'].mean()
-                second_half = monthly_totals_df.tail(6)['Total_Rofo'].mean()
-                if first_half > 0:
-                    growth_6m = ((second_half - first_half) / first_half) * 100
-            
-            st.metric("6M Growth Trend", f"{growth_6m:+.1f}%")
-    
-    # ================ DUAL CHART ANALYSIS WITH FILTERS ================
-    st.divider()
-    st.subheader("📈 Dual Chart Analysis")
-    
-    # Create two columns for side-by-side charts
-    chart_col1, chart_col2 = st.columns(2)
-    
-    with chart_col1:
-        # ================ HISTORICAL SALES CHART (LEFT) ================
-        st.markdown("#### 📊 Historical Sales Trend")
-        
-        if not df_sales.empty:
-            # Filter controls for historical chart
-            hist_col1, hist_col2 = st.columns(2)
-            
-            with hist_col1:
-                # Brand filter for historical
-                hist_brands = df_sales['Brand'].unique() if 'Brand' in df_sales.columns else []
-                hist_selected_brands = st.multiselect(
-                    "Filter Brands (Sales)",
-                    options=hist_brands,
-                    default=hist_brands[:min(3, len(hist_brands))] if len(hist_brands) > 0 else [],
-                    help="Select brands to show in historical chart",
-                    key="hist_brand_filter"
-                )
-            
-            with hist_col2:
-                # Time period filter
-                hist_months = st.slider(
-                    "Months to Show",
-                    min_value=3,
-                    max_value=24,
-                    value=12,
-                    help="Number of historical months to display",
-                    key="hist_month_slider"
-                )
-            
-            # Prepare historical data
-            hist_sales = df_sales.copy()
-            
-            # Apply brand filter
-            if hist_selected_brands and len(hist_selected_brands) > 0:
-                hist_sales = hist_sales[hist_sales['Brand'].isin(hist_selected_brands)]
-            
-            # Get last N months
-            sales_months = sorted(hist_sales['Month'].unique())
-            if len(sales_months) >= hist_months:
-                display_months = sales_months[-hist_months:]
-                hist_sales = hist_sales[hist_sales['Month'].isin(display_months)]
-            
-            # Aggregate by month
-            if not hist_sales.empty:
-                monthly_hist = hist_sales.groupby('Month').agg({
-                    'Sales_Qty': 'sum'
-                }).reset_index()
-                monthly_hist = monthly_hist.sort_values('Month')
-                monthly_hist['Month_Label'] = monthly_hist['Month'].apply(lambda x: x.strftime('%b-%y'))
-                
-                # Create historical chart
-                fig_hist = go.Figure()
-                
-                fig_hist.add_trace(go.Scatter(
-                    x=monthly_hist['Month_Label'],
-                    y=monthly_hist['Sales_Qty'],
-                    name='Sales',
-                    mode='lines+markers',
-                    line=dict(color='#4CAF50', width=3),
-                    marker=dict(size=6, color='#4CAF50'),
-                    hovertemplate='<b>%{x}</b><br>Sales: %{y:,.0f}<extra></extra>'
-                ))
-                
-                # Add average line
-                avg_sales = monthly_hist['Sales_Qty'].mean()
-                fig_hist.add_hline(
-                    y=avg_sales,
-                    line_dash="dash",
-                    line_color="gray",
-                    annotation_text=f"Avg: {avg_sales:,.0f}",
-                    annotation_position="bottom right"
-                )
-                
-                fig_hist.update_layout(
-                    height=400,
-                    title=f'Sales Trend ({len(hist_selected_brands)} brands)',
-                    xaxis_title='Month',
-                    yaxis_title='Sales Quantity',
-                    hovermode='x unified',
-                    plot_bgcolor='white',
-                    showlegend=True
-                )
-                
-                st.plotly_chart(fig_hist, use_container_width=True)
-                
-                # Historical summary
-                total_sales = monthly_hist['Sales_Qty'].sum()
-                avg_monthly = monthly_hist['Sales_Qty'].mean()
-                peak_sales = monthly_hist['Sales_Qty'].max()
-                peak_month = monthly_hist.loc[monthly_hist['Sales_Qty'].idxmax(), 'Month_Label']
-                
-                st.caption(f"""
-                **Summary:** Total: {total_sales:,.0f} | Avg: {avg_monthly:,.0f}/month | Peak: {peak_sales:,.0f} ({peak_month})
-                """)
-            else:
-                st.info("No historical sales data for selected filters")
+        # Check 2: Month columns
+        if rofo_onwards_month_cols:
+            validation_results.append({
+                'Check': 'Month Columns',
+                'Status': '✅ PASSED',
+                'Details': f"Found {len(rofo_onwards_month_cols)} month columns"
+            })
         else:
-            st.info("No historical sales data available")
-    
-    with chart_col2:
-        # ================ ROFO TREND ANALYSIS (RIGHT) ================
-        st.markdown("#### 🔮 Rofo Forecast Analysis")
+            validation_results.append({
+                'Check': 'Month Columns',
+                'Status': '❌ FAILED',
+                'Details': "No month columns found (expected Jan-26, Feb-26, etc.)"
+            })
         
-        if month_cols and len(monthly_totals_df) > 0:
-            # Filter controls for Rofo chart
-            rofo_col1, rofo_col2 = st.columns(2)
+        # Check 3: SKU coverage
+        if 'SKU_ID' in df_rofo_onwards.columns:
+            total_skus = len(df_rofo_onwards)
+            active_skus = len(df_product[df_product['Status'].str.upper() == 'ACTIVE']) if 'df_product' in locals() else 0
             
-            with rofo_col1:
-                # SKU filter
-                sku_options = df_rofo['SKU_ID'].unique().tolist() if 'SKU_ID' in df_rofo.columns else []
-                selected_skus = st.multiselect(
-                    "Filter by SKU",
-                    options=sku_options,
-                    default=[],
-                    help="Select specific SKUs to analyze",
-                    key="rofo_sku_filter"
-                )
-            
-            with rofo_col2:
-                # Brand filter for Rofo
-                rofo_brands = df_rofo['Brand'].unique() if 'Brand' in df_rofo.columns else []
-                rofo_selected_brands = st.multiselect(
-                    "Filter Brands (Rofo)",
-                    options=rofo_brands,
-                    default=rofo_brands[:min(3, len(rofo_brands))] if len(rofo_brands) > 0 else [],
-                    help="Select brands to show in Rofo chart",
-                    key="rofo_brand_filter"
-                )
-            
-            # Prepare Rofo data based on filters
-            rofo_chart_data = df_rofo.copy()
-            
-            # Apply SKU filter
-            if selected_skus and len(selected_skus) > 0:
-                rofo_chart_data = rofo_chart_data[rofo_chart_data['SKU_ID'].isin(selected_skus)]
-            
-            # Apply brand filter
-            if rofo_selected_brands and len(rofo_selected_brands) > 0:
-                rofo_chart_data = rofo_chart_data[rofo_chart_data['Brand'].isin(rofo_selected_brands)]
-            
-            # Calculate totals
-            if not rofo_chart_data.empty:
-                rofo_monthly_totals = rofo_chart_data[month_cols].sum()
-                rofo_monthly_df = pd.DataFrame({
-                    'Month': rofo_monthly_totals.index,
-                    'Total_Rofo': rofo_monthly_totals.values
+            if active_skus > 0:
+                coverage_pct = (total_skus / active_skus) * 100
+                validation_results.append({
+                    'Check': 'SKU Coverage',
+                    'Status': '⚠️ CHECK' if coverage_pct < 80 else '✅ GOOD',
+                    'Details': f"{total_skus} SKUs ({coverage_pct:.1f}% of {active_skus} active)"
                 })
-                rofo_monthly_df['Month_Date'] = rofo_monthly_df['Month'].apply(parse_rofo_month)
-                rofo_monthly_df = rofo_monthly_df.sort_values('Month_Date')
-                
-                # Create Rofo chart
-                fig_rofo = go.Figure()
-                
-                # Add main Rofo line
-                fig_rofo.add_trace(go.Scatter(
-                    x=rofo_monthly_df['Month'],
-                    y=rofo_monthly_df['Total_Rofo'],
-                    name='Rofo Forecast',
-                    mode='lines+markers',
-                    line=dict(color='#667eea', width=3, dash='solid'),
-                    marker=dict(size=8, color='#667eea'),
-                    hovertemplate='<b>%{x}</b><br>Rofo: %{y:,.0f}<extra></extra>'
-                ))
-                
-                # Add individual SKU lines if few SKUs selected
-                if selected_skus and len(selected_skus) <= 5:
-                    for sku in selected_skus:
-                        sku_data = rofo_chart_data[rofo_chart_data['SKU_ID'] == sku]
-                        if not sku_data.empty:
-                            sku_name = sku_data.iloc[0].get('Product_Name', sku)
-                            sku_values = sku_data[month_cols].iloc[0].values
-                            
-                            fig_rofo.add_trace(go.Scatter(
-                                x=rofo_monthly_df['Month'],
-                                y=sku_values,
-                                name=f'SKU: {sku_name[:20]}',
-                                mode='lines',
-                                line=dict(width=1, dash='dot'),
-                                opacity=0.6,
-                                hovertemplate=f'<b>%{{x}}</b><br>{sku_name}: %{{y:,.0f}}<extra></extra>'
-                            ))
-                
-                # Add growth annotations
-                for i in range(1, len(rofo_monthly_df)):
-                    prev = rofo_monthly_df.iloc[i-1]['Total_Rofo']
-                    curr = rofo_monthly_df.iloc[i]['Total_Rofo']
-                    
-                    if prev > 0:
-                        growth_pct = ((curr - prev) / prev) * 100
-                        
-                        if abs(growth_pct) > 20:  # Significant change
-                            fig_rofo.add_annotation(
-                                x=rofo_monthly_df.iloc[i]['Month'],
-                                y=curr,
-                                text=f"{growth_pct:+.0f}%",
-                                showarrow=True,
-                                arrowhead=2,
-                                arrowsize=1,
-                                arrowwidth=2,
-                                arrowcolor="#FF9800" if growth_pct > 0 else "#FF5252",
-                                font=dict(size=10, color="#FF9800" if growth_pct > 0 else "#FF5252"),
-                                yshift=20 if growth_pct > 0 else -20
-                            )
-                
-                fig_rofo.update_layout(
-                    height=400,
-                    title=f'Rofo Forecast Trend',
-                    xaxis_title='Month',
-                    yaxis_title='Rofo Quantity',
-                    hovermode='x unified',
-                    plot_bgcolor='white',
-                    showlegend=True,
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="right",
-                        x=1
-                    )
+        
+        # Check 4: Zero values
+        if rofo_onwards_month_cols:
+            zero_counts = (df_rofo_onwards[rofo_onwards_month_cols] == 0).sum().sum()
+            total_cells = len(df_rofo_onwards) * len(rofo_onwards_month_cols)
+            zero_pct = (zero_counts / total_cells) * 100
+            
+            status = '✅ GOOD' if zero_pct < 20 else '⚠️ WARNING' if zero_pct < 50 else '❌ HIGH'
+            validation_results.append({
+                'Check': 'Zero Values',
+                'Status': status,
+                'Details': f"{zero_counts:,} zero cells ({zero_pct:.1f}% of total)"
+            })
+        
+        # Check 5: Negative values
+        if rofo_onwards_month_cols:
+            negative_counts = (df_rofo_onwards[rofo_onwards_month_cols] < 0).sum().sum()
+            if negative_counts > 0:
+                validation_results.append({
+                    'Check': 'Negative Values',
+                    'Status': '❌ FAILED',
+                    'Details': f"{negative_counts:,} negative values found"
+                })
+            else:
+                validation_results.append({
+                    'Check': 'Negative Values',
+                    'Status': '✅ PASSED',
+                    'Details': "No negative values"
+                })
+        
+        # Display validation results
+        validation_df = pd.DataFrame(validation_results)
+        st.dataframe(
+            validation_df,
+            column_config={
+                "Status": st.column_config.TextColumn(
+                    "Status",
+                    width="small"
+                ),
+                "Details": st.column_config.TextColumn(
+                    "Details",
+                    width="large"
                 )
+            },
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        # ================ ROFO SUMMARY DASHBOARD ================
+        st.divider()
+        st.subheader("📊 Rofo Overview")
+        
+        # Summary metrics
+        if rofo_onwards_month_cols:
+            # Calculate totals by month
+            monthly_totals = df_rofo_onwards[rofo_onwards_month_cols].sum()
+            monthly_totals_df = pd.DataFrame({
+                'Month': monthly_totals.index,
+                'Total_Rofo': monthly_totals.values
+            })
+            
+            # Format month names for sorting
+            def parse_rofo_month(month_str):
+                try:
+                    month_part, year_part = month_str.split('-')
+                    month_num = datetime.strptime(month_part, '%b').month
+                    year = 2000 + int(year_part) if int(year_part) < 100 else int(year_part)
+                    return datetime(year, month_num, 1)
+                except:
+                    return datetime.now()
+            
+            monthly_totals_df['Month_Date'] = monthly_totals_df['Month'].apply(parse_rofo_month)
+            monthly_totals_df = monthly_totals_df.sort_values('Month_Date')
+            
+            # Display metrics
+            col_metric1, col_metric2, col_metric3, col_metric4 = st.columns(4)
+            
+            with col_metric1:
+                total_rofo = monthly_totals_df['Total_Rofo'].sum()
+                st.metric("Total Rofo Volume", f"{total_rofo:,.0f}")
+            
+            with col_metric2:
+                avg_monthly = monthly_totals_df['Total_Rofo'].mean()
+                st.metric("Avg Monthly", f"{avg_monthly:,.0f}")
+            
+            with col_metric3:
+                peak_month = monthly_totals_df.loc[monthly_totals_df['Total_Rofo'].idxmax()]
+                st.metric("Peak Month", f"{peak_month['Total_Rofo']:,.0f}")
+                st.caption(peak_month['Month'])
+            
+            with col_metric4:
+                growth_6m = 0
+                if len(monthly_totals_df) >= 7:
+                    first_half = monthly_totals_df.head(6)['Total_Rofo'].mean()
+                    second_half = monthly_totals_df.tail(6)['Total_Rofo'].mean()
+                    if first_half > 0:
+                        growth_6m = ((second_half - first_half) / first_half) * 100
                 
-                st.plotly_chart(fig_rofo, use_container_width=True)
-                
-                # Rofo summary
-                total_rofo_filtered = rofo_monthly_df['Total_Rofo'].sum()
-                avg_rofo_monthly = rofo_monthly_df['Total_Rofo'].mean()
-                peak_rofo = rofo_monthly_df['Total_Rofo'].max()
-                peak_rofo_month = rofo_monthly_df.loc[rofo_monthly_df['Total_Rofo'].idxmax(), 'Month']
-                
-                st.caption(f"""
-                **Summary:** Total: {total_rofo_filtered:,.0f} | Avg: {avg_rofo_monthly:,.0f}/month | Peak: {peak_rofo:,.0f} ({peak_rofo_month})
-                """)
-                
-                # Comparison with historical (if available)
-                if 'avg_monthly' in locals() and avg_monthly > 0:
-                    rofo_vs_sales = (avg_rofo_monthly / avg_monthly) * 100 if avg_monthly > 0 else 0
-                    
-                    if rofo_vs_sales > 120:
-                        st.warning(f"⚠️ Rofo is {rofo_vs_sales:.0f}% above historical sales average")
-                    elif rofo_vs_sales < 80:
-                        st.info(f"📉 Rofo is {rofo_vs_sales:.0f}% below historical sales average")
-                    else:
-                        st.success(f"✅ Rofo aligned with historical average ({rofo_vs_sales:.0f}%)")
-            else:
-                st.info("No Rofo data for selected filters")
+                st.metric("6M Growth Trend", f"{growth_6m:+.1f}%")
+
+# --- TAB 8: PROFITABILITY ANALYSIS ---
+with tab8:
+    st.subheader("💰 Profitability & Financial Analysis")
+    
+    if not df_financial.empty:
+        # 1. QUICK METRICS
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            total_revenue = df_financial['Revenue'].sum()
+            st.metric("Total Revenue", f"${total_revenue:,.0f}")
+        
+        with col2:
+            total_margin = df_financial['Gross_Margin'].sum()
+            st.metric("Total Gross Margin", f"${total_margin:,.0f}")
+        
+        with col3:
+            avg_margin_pct = (total_margin / total_revenue * 100) if total_revenue > 0 else 0
+            st.metric("Avg Margin %", f"{avg_margin_pct:.1f}%")
+        
+        with col4:
+            total_units = df_financial['Sales_Qty'].sum()
+            avg_price = total_revenue / total_units if total_units > 0 else 0
+            st.metric("Avg Selling Price", f"${avg_price:.2f}")
+        
+        # 2. INVENTORY VALUE (Real Impact!)
+        st.divider()
+        st.subheader("📦 Inventory Financial Value")
+        
+        if not df_inventory_financial.empty:
+            total_cost_value = df_inventory_financial['Value_at_Cost'].sum()
+            total_retail_value = df_inventory_financial['Value_at_Retail'].sum()
+            total_potential_margin = df_inventory_financial['Potential_Margin'].sum()
+            inventory_margin_pct = (total_potential_margin / total_retail_value * 100) if total_retail_value > 0 else 0
+            
+            col_inv1, col_inv2, col_inv3, col_inv4 = st.columns(4)
+            
+            with col_inv1:
+                st.metric("Inventory @ Cost", f"${total_cost_value:,.0f}")
+            
+            with col_inv2:
+                st.metric("Inventory @ Retail", f"${total_retail_value:,.0f}")
+            
+            with col_inv3:
+                st.metric("Potential Margin", f"${total_potential_margin:,.0f}")
+            
+            with col_inv4:
+                st.metric("Inventory Margin %", f"{inventory_margin_pct:.1f}%")
+            
+            # Show high value inventory
+            high_value_skus = df_inventory_financial.sort_values('Value_at_Cost', ascending=False).head(10)
+            
+            st.markdown("#### 📊 Top 10 Highest Value Inventory Items")
+            st.dataframe(
+                high_value_skus[['SKU_ID', 'Product_Name', 'Brand', 'Stock_Qty', 
+                               'Value_at_Cost', 'Value_at_Retail', 'Potential_Margin', 'Margin_Percentage']],
+                column_config={
+                    "Value_at_Cost": st.column_config.NumberColumn("Value @ Cost", format="$ %.0f"),
+                    "Value_at_Retail": st.column_config.NumberColumn("Value @ Retail", format="$ %.0f"),
+                    "Potential_Margin": st.column_config.NumberColumn("Potential Margin", format="$ %.0f"),
+                    "Margin_Percentage": st.column_config.ProgressColumn("Margin %", format="%.1f%%", min_value=0, max_value=100)
+                },
+                use_container_width=True
+            )
+        
+        # 3. PROFITABILITY TREND
+        st.divider()
+        st.subheader("📈 Monthly Profitability Trend")
+        
+        monthly_profit = df_financial.groupby('Month').agg({
+            'Revenue': 'sum',
+            'Gross_Margin': 'sum',
+            'Sales_Qty': 'sum'
+        }).reset_index()
+        
+        monthly_profit['Margin_Percentage'] = np.where(
+            monthly_profit['Revenue'] > 0,
+            (monthly_profit['Gross_Margin'] / monthly_profit['Revenue'] * 100),
+            0
+        )
+        
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=monthly_profit['Month'].dt.strftime('%b-%Y'),
+            y=monthly_profit['Revenue'],
+            name='Revenue',
+            marker_color='#667eea'
+        ))
+        fig.add_trace(go.Scatter(
+            x=monthly_profit['Month'].dt.strftime('%b-%Y'),
+            y=monthly_profit['Margin_Percentage'],
+            name='Margin %',
+            yaxis='y2',
+            line=dict(color='#4CAF50', width=3)
+        ))
+        
+        fig.update_layout(
+            title='Monthly Revenue vs Margin %',
+            yaxis=dict(title='Revenue ($)'),
+            yaxis2=dict(title='Margin %', overlaying='y', side='right'),
+            height=400
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # 4. TOP PERFORMING SKUs BY MARGIN
+        st.divider()
+        st.subheader("🏆 Top Performing SKUs by Gross Margin")
+        
+        if not profitability_segments.empty:
+            # Top 10 by absolute margin
+            st.dataframe(
+                profitability_segments.head(10)[['SKU_ID', 'Product_Name', 'Brand', 
+                                               'Sales_Qty', 'Revenue', 'Gross_Margin', 'Margin_Percentage', 'Margin_Segment']],
+                column_config={
+                    "Revenue": st.column_config.NumberColumn("Revenue", format="$ %.0f"),
+                    "Gross_Margin": st.column_config.NumberColumn("Gross Margin", format="$ %.0f"),
+                    "Margin_Percentage": st.column_config.ProgressColumn("Margin %", format="%.1f%%", min_value=0, max_value=100)
+                },
+                use_container_width=True
+            )
+            
+            # Margin segmentation analysis
+            st.divider()
+            st.subheader("📊 Margin Segmentation Analysis")
+            
+            segment_summary = profitability_segments.groupby('Margin_Segment').agg({
+                'SKU_ID': 'count',
+                'Revenue': 'sum',
+                'Gross_Margin': 'sum',
+                'Sales_Qty': 'sum'
+            }).reset_index()
+            
+            segment_summary['Avg_Margin_Percentage'] = (segment_summary['Gross_Margin'] / segment_summary['Revenue'] * 100)
+            segment_summary = segment_summary.sort_values('Revenue', ascending=False)
+            
+            col_seg1, col_seg2 = st.columns(2)
+            
+            with col_seg1:
+                # Pie chart
+                fig_pie = px.pie(segment_summary, values='Revenue', names='Margin_Segment',
+                                title='Revenue Distribution by Margin Segment',
+                                color='Margin_Segment',
+                                color_discrete_map={
+                                    'High Margin (>40%)': '#4CAF50',
+                                    'Medium Margin (20-40%)': '#FF9800',
+                                    'Low Margin (<20%)': '#F44336',
+                                    'Negative Margin': '#9E9E9E'
+                                })
+                fig_pie.update_layout(height=400)
+                st.plotly_chart(fig_pie, use_container_width=True)
+            
+            with col_seg2:
+                # Bar chart
+                fig_bar = px.bar(segment_summary, x='Margin_Segment', y='Avg_Margin_Percentage',
+                                title='Average Margin % by Segment',
+                                color='Margin_Segment',
+                                color_discrete_map={
+                                    'High Margin (>40%)': '#4CAF50',
+                                    'Medium Margin (20-40%)': '#FF9800',
+                                    'Low Margin (<20%)': '#F44336',
+                                    'Negative Margin': '#9E9E9E'
+                                })
+                fig_bar.update_layout(height=400)
+                st.plotly_chart(fig_bar, use_container_width=True)
+        
+        # 5. SEASONALITY ANALYSIS
+        st.divider()
+        st.subheader("🌊 Seasonality Analysis")
+        
+        if not seasonal_pattern.empty:
+            fig_seasonal = go.Figure()
+            
+            fig_seasonal.add_trace(go.Scatter(
+                x=seasonal_pattern['Month_Name'],
+                y=seasonal_pattern['Seasonal_Index_Revenue'],
+                name='Revenue Index',
+                mode='lines+markers',
+                line=dict(color='#667eea', width=3),
+                marker=dict(size=8, color='#667eea')
+            ))
+            
+            fig_seasonal.add_trace(go.Scatter(
+                x=seasonal_pattern['Month_Name'],
+                y=seasonal_pattern['Seasonal_Index_Margin'],
+                name='Margin Index',
+                mode='lines+markers',
+                line=dict(color='#4CAF50', width=3),
+                marker=dict(size=8, color='#4CAF50')
+            ))
+            
+            fig_seasonal.add_hline(y=1, line_dash="dash", line_color="gray",
+                                 annotation_text="Average = 1.0")
+            
+            fig_seasonal.update_layout(
+                height=400,
+                title='Seasonal Indices (Monthly Average = 1.0)',
+                xaxis_title='Month',
+                yaxis_title='Seasonal Index',
+                hovermode='x unified'
+            )
+            
+            st.plotly_chart(fig_seasonal, use_container_width=True)
+            
+            # Season recommendations
+            peak_months = seasonal_pattern[seasonal_pattern['Seasonal_Index_Revenue'] >= 1.2]
+            low_months = seasonal_pattern[seasonal_pattern['Seasonal_Index_Revenue'] < 0.9]
+            
+            if not peak_months.empty:
+                st.info(f"**📈 Peak Season:** {', '.join(peak_months['Month_Name'].tolist())}")
+            
+            if not low_months.empty:
+                st.warning(f"**📉 Low Season:** {', '.join(low_months['Month_Name'].tolist())}")
+        
+        # 6. FINANCIAL RECOMMENDATIONS
+        st.divider()
+        st.subheader("💡 Financial Recommendations")
+        
+        recommendations = []
+        
+        # High margin SKU analysis
+        if not profitability_segments.empty:
+            high_margin_skus = profitability_segments[profitability_segments['Margin_Segment'] == 'High Margin (>40%)']
+            low_margin_skus = profitability_segments[profitability_segments['Margin_Segment'] == 'Low Margin (<20%)']
+            negative_margin_skus = profitability_segments[profitability_segments['Margin_Segment'] == 'Negative Margin']
+            
+            if not high_margin_skus.empty:
+                recommendations.append(f"✅ **Focus on High Margin SKUs:** {len(high_margin_skus)} SKUs with >40% margin contribute ${high_margin_skus['Gross_Margin'].sum():,.0f} margin")
+            
+            if not low_margin_skus.empty:
+                recommendations.append(f"⚠️ **Review Low Margin SKUs:** {len(low_margin_skus)} SKUs with <20% margin")
+            
+            if not negative_margin_skus.empty:
+                recommendations.append(f"❌ **Urgent Action Needed:** {len(negative_margin_skus)} SKUs with negative margin")
+        
+        # Inventory financial risk
+        if not df_inventory_financial.empty:
+            slow_moving_high_value = df_inventory_financial[
+                (df_inventory_financial['Value_at_Cost'] > 1000) & 
+                (df_inventory_financial['Stock_Qty'] > 100)
+            ]
+            
+            if not slow_moving_high_value.empty:
+                recommendations.append(f"📉 **Inventory Risk:** {len(slow_moving_high_value)} high-value items (>$1000) with high stock levels")
+        
+        # Display recommendations
+        if recommendations:
+            st.markdown("#### 🚀 Action Items:")
+            for rec in recommendations:
+                st.write(f"- {rec}")
         else:
-            st.info("No Rofo data available")
-    
-    # ================ ADDITIONAL IDEAS & INSIGHTS ================
-    st.divider()
-    st.subheader("💡 Advanced Analysis & Ideas")
-    
-    # Create tabs for different advanced analyses
-    insight_tab1, insight_tab2, insight_tab3, insight_tab4 = st.tabs([
-        "📈 Growth Analysis", 
-        "🎯 SKU Optimization", 
-        "📊 Capacity Planning",
-        "🤖 AI Suggestions"
-    ])
-    
-    with insight_tab1:
-        st.markdown("#### 📈 Smart Growth Analysis")
-        
-        if month_cols and len(month_cols) >= 6:
-            # Calculate growth patterns
-            first_half = month_cols[:6]
-            second_half = month_cols[-6:] if len(month_cols) >= 12 else month_cols[6:]
+            st.success("✅ **Excellent financial performance!** No major issues detected.")
             
-            first_half_total = df_rofo[first_half].sum().sum()
-            second_half_total = df_rofo[second_half].sum().sum()
-            
-            if first_half_total > 0:
-                growth_rate = ((second_half_total - first_half_total) / first_half_total) * 100
-                
-                col_growth1, col_growth2 = st.columns(2)
-                
-                with col_growth1:
-                    st.metric("H1 Total", f"{first_half_total:,.0f}")
-                
-                with col_growth2:
-                    st.metric("H2 Total", f"{second_half_total:,.0f}", delta=f"{growth_rate:+.1f}%")
-                
-                # Growth recommendations
-                if growth_rate > 30:
-                    st.warning("""
-                    **High Growth Alert (>30%):**
-                    - Ensure marketing budget aligns with growth targets
-                    - Check production capacity for H2
-                    - Consider phasing growth more evenly
-                    """)
-                elif growth_rate < -10:
-                    st.warning("""
-                    **Declining Forecast (< -10%):**
-                    - Review market conditions
-                    - Check competitor activity
-                    - Consider promotional activities for H2
-                    """)
-                else:
-                    st.success("""
-                    **Steady Growth Pattern:**
-                    - Forecast shows sustainable growth
-                    - Good balance between halves
-                    - Lower risk profile
-                    """)
-    
-    with insight_tab2:
-        st.markdown("#### 🎯 SKU Portfolio Optimization")
-        
-        if month_cols and 'Brand' in df_rofo.columns and 'SKU_Tier' in df_rofo.columns:
-            # Pareto analysis (80/20 rule)
-            sku_totals = df_rofo[month_cols].sum(axis=1)
-            sku_totals_sorted = sku_totals.sort_values(ascending=False)
-            
-            cumulative_percentage = sku_totals_sorted.cumsum() / sku_totals_sorted.sum() * 100
-            
-            # Find 80% point
-            top_skus_80 = cumulative_percentage[cumulative_percentage <= 80]
-            
-            col_opt1, col_opt2 = st.columns(2)
-            
-            with col_opt1:
-                st.metric("Top SKUs (80% volume)", len(top_skus_80))
-                st.metric("Bottom SKUs (20% volume)", len(df_rofo) - len(top_skus_80))
-            
-            with col_opt2:
-                efficiency = (len(top_skus_80) / len(df_rofo)) * 100
-                st.metric("Portfolio Efficiency", f"{efficiency:.1f}%")
-                st.caption("Lower % = more efficient")
-            
-            # Recommendations
-            if efficiency < 20:
-                st.success("""
-                **✅ Excellent Portfolio Efficiency!**
-                - Small number of SKUs drive majority of volume
-                - Consider focusing resources on top SKUs
-                - Potential to prune low-performing SKUs
-                """)
-            elif efficiency < 40:
-                st.info("""
-                **📊 Good Portfolio Balance**
-                - Healthy mix of SKUs
-                - Consider A/B/C classification
-                - Review bottom 20% for discontinuation
-                """)
-            else:
-                st.warning("""
-                **⚠️ Portfolio Optimization Opportunity**
-                - Many SKUs contribute little volume
-                - Consider SKU rationalization
-                - Focus resources on top performers
-                """)
-    
-    with insight_tab3:
-        st.markdown("#### 📊 Capacity & Resource Planning")
-        
-        if month_cols:
-            # Calculate monthly capacity requirements
-            monthly_capacity = df_rofo[month_cols].sum()
-            avg_capacity = monthly_capacity.mean()
-            peak_capacity = monthly_capacity.max()
-            trough_capacity = monthly_capacity.min()
-            
-            capacity_variation = ((peak_capacity - trough_capacity) / avg_capacity) * 100
-            
-            col_cap1, col_cap2, col_cap3 = st.columns(3)
-            
-            with col_cap1:
-                st.metric("Avg Monthly Need", f"{avg_capacity:,.0f}")
-            
-            with col_cap2:
-                st.metric("Peak Requirement", f"{peak_capacity:,.0f}")
-            
-            with col_cap3:
-                st.metric("Variation", f"{capacity_variation:.0f}%")
-            
-            # Capacity recommendations
-            if capacity_variation > 50:
-                st.warning("""
-                **⚠️ High Capacity Variation (>50%):**
-                - Consider production smoothing
-                - Explore inventory buffer strategies
-                - Review peak month assumptions
-                - Consider temporary capacity solutions
-                """)
-            
-            # Resource allocation by brand
-            if 'Brand' in df_rofo.columns:
-                brand_capacity = df_rofo.groupby('Brand')[month_cols].sum().sum(axis=1)
-                brand_capacity_pct = (brand_capacity / brand_capacity.sum() * 100).sort_values(ascending=False)
-                
-                st.markdown("**Resource Allocation by Brand:**")
-                
-                # Display top 5 brands
-                for brand, pct in brand_capacity_pct.head(5).items():
-                    st.progress(int(pct), text=f"{brand}: {pct:.1f}% of total")
-    
-    with insight_tab4:
-        st.markdown("#### 🤖 AI-Powered Suggestions")
-        
-        # Generate smart suggestions based on data patterns
-        suggestions = []
-        
-        # Suggestion 1: Seasonality adjustment
-        if month_cols and len(month_cols) >= 12:
-            monthly_pattern = df_rofo[month_cols].sum()
-            monthly_pattern_std = monthly_pattern.std()
-            monthly_pattern_cv = (monthly_pattern_std / monthly_pattern.mean()) * 100
-            
-            if monthly_pattern_cv > 40:
-                suggestions.append("""
-                **🌊 High Seasonality Detected:**
-                - Consider implementing safety stock for peak months
-                - Explore demand smoothing promotions for trough months
-                - Review production planning for seasonal peaks
-                """)
-        
-        # Suggestion 2: SKU concentration
-        if 'Brand' in df_rofo.columns:
-            brand_concentration = df_rofo['Brand'].value_counts(normalize=True).iloc[0] * 100
-            
-            if brand_concentration > 50:
-                suggestions.append(f"""
-                **🎯 Brand Concentration Alert ({brand_concentration:.0f}%):**
-                - High dependency on top brand increases risk
-                - Consider diversifying brand portfolio
-                - Develop contingency plans for brand-specific issues
-                """)
-        
-        # Suggestion 3: Forecast consistency
-        if month_cols:
-            month_to_month_changes = df_rofo[month_cols].diff(axis=1).abs().mean().mean()
-            avg_monthly = df_rofo[month_cols].mean().mean()
-            
-            if avg_monthly > 0:
-                change_ratio = (month_to_month_changes / avg_monthly) * 100
-                
-                if change_ratio > 30:
-                    suggestions.append("""
-                    **📉 High Forecast Volatility:**
-                    - Month-to-month changes are significant
-                    - Consider smoothing the forecast
-                    - Review assumptions driving large fluctuations
-                    """)
-        
-        # Display suggestions
-        if suggestions:
-            for suggestion in suggestions:
-                st.info(suggestion)
-        else:
-            st.success("""
-            **✅ Forecast Looks Well-Balanced!**
-            - Good seasonality balance
-            - Healthy brand distribution
-            - Reasonable month-to-month changes
-            """)
-        
-        # Actionable insights
-        st.markdown("#### 🚀 Actionable Insights")
-        
-        insight_col1, insight_col2 = st.columns(2)
-        
-        with insight_col1:
-            st.markdown("""
-            **📈 Growth Opportunities:**
-            1. **Identify top 3 growing SKUs** - allocate more resources
-            2. **Review declining SKUs** - consider discontinuation
-            3. **Explore cross-selling** between related SKUs
-            """)
-        
-        with insight_col2:
-            st.markdown("""
-            **💰 Cost Optimization:**
-            1. **Consolidate low-volume SKUs** - reduce complexity
-            2. **Optimize inventory levels** based on forecast
-            3. **Negotiate better terms** with high-volume suppliers
-            """)
-    
-    # ================ CONTINUE WITH PREVIOUS SECTIONS... ================
-    # (Rest of your existing code for Brand Analysis, Achievability Check, etc.)
+    else:
+        st.warning("Financial data not available. Check price columns in Product Master.")
 
 # --- FOOTER ---
 st.divider()
 st.markdown("""
 <div style="text-align: center; color: #666; font-size: 0.9rem; padding: 1rem;">
-    <p>🚀 <strong>Inventory Intelligence Dashboard v5.2</strong> | Professional Inventory Control & Demand Planning</p>
-    <p>✅ Product Name Auto-Lookup from Master Data | ✅ 3-Month Average Sales for Inventory | ✅ Monthly Performance Tracking</p>
-    <p>📊 All tables now show Product Name alongside SKU ID | 🔄 Automatic data enrichment from Product Master</p>
+    <p>🚀 <strong>Inventory Intelligence Dashboard v6.0</strong> | Professional Inventory Control & Financial Analytics</p>
+    <p>✅ Product Name Auto-Lookup | ✅ Financial Analysis with Price Data | ✅ Inventory Value Analysis</p>
+    <p>💰 Profitability Dashboard | 📊 Seasonality Analysis | 🎯 Margin Segmentation</p>
+    <p>📈 Data since January 2024 | 🔄 Real-time Google Sheets Integration</p>
 </div>
 """, unsafe_allow_html=True)
