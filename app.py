@@ -2759,104 +2759,156 @@ with tab3:
             high_value_items = df_inventory_financial.sort_values('Value_at_Cost', ascending=False).head(10)
             
             st.markdown("#### 📊 Top 10 Highest Value Inventory Items")
-            st.dataframe(
-                high_value_items[['SKU_ID', 'Product_Name', 'Brand', 'Stock_Qty', 
-                                'Value_at_Cost', 'Value_at_Retail', 'Potential_Margin']],
-                column_config={
-                    "Value_at_Cost": st.column_config.NumberColumn("Value @ Cost", format="$ %.0f"),
-                    "Value_at_Retail": st.column_config.NumberColumn("Value @ Retail", format="$ %.0f"),
-                    "Potential_Margin": st.column_config.NumberColumn("Potential Margin", format="$ %.0f")
-                },
-                use_container_width=True
-            )
             
-            # Inventory risk analysis
+            # Tampilkan kolom yang tersedia
+            display_cols_high_value = []
+            for col in ['SKU_ID', 'Product_Name', 'Brand', 'Stock_Qty', 
+                       'Value_at_Cost', 'Value_at_Retail', 'Potential_Margin']:
+                if col in high_value_items.columns:
+                    display_cols_high_value.append(col)
+            
+            if display_cols_high_value:
+                st.dataframe(
+                    high_value_items[display_cols_high_value],
+                    column_config={
+                        "Value_at_Cost": st.column_config.NumberColumn("Value @ Cost", format="$ %.0f"),
+                        "Value_at_Retail": st.column_config.NumberColumn("Value @ Retail", format="$ %.0f"),
+                        "Potential_Margin": st.column_config.NumberColumn("Potential Margin", format="$ %.0f")
+                    } if 'Value_at_Cost' in display_cols_high_value else {},
+                    use_container_width=True
+                )
+            else:
+                st.warning("No financial data available for display")
+            
+            # ================ INVENTORY RISK ANALYSIS ================
             st.divider()
             st.subheader("⚠️ Inventory Risk Analysis")
             
             # Identify high-risk items (high value + slow moving)
             if 'inventory_df' in inventory_metrics:
+                # Gabungkan inventory metrics dengan financial data
                 df_inv_risk = pd.merge(
                     inventory_metrics['inventory_df'][['SKU_ID', 'Cover_Months', 'Avg_Monthly_Sales_3M', 'Inventory_Status']],
-                    df_inventory_financial[['SKU_ID', 'Value_at_Cost', 'Value_at_Retail']],
+                    df_inventory_financial[['SKU_ID', 'Value_at_Cost', 'Value_at_Retail', 'Potential_Margin']],
                     on='SKU_ID',
                     how='left'
                 )
                 
+                # Pastikan Product_Name ada
+                if 'Product_Name' not in df_inv_risk.columns:
+                    df_inv_risk = add_product_info_to_data(df_inv_risk, df_product)
+                
                 # Flag high risk items
-                high_risk = df_inv_risk[
+                high_risk_condition = (
                     (df_inv_risk['Cover_Months'] > 3) &  # Slow moving (>3 months cover)
                     (df_inv_risk['Value_at_Cost'] > 1000)  # High value (>$1000)
-                ].sort_values('Value_at_Cost', ascending=False)
+                )
+                
+                # Filter hanya jika kolomnya ada
+                if 'Cover_Months' in df_inv_risk.columns and 'Value_at_Cost' in df_inv_risk.columns:
+                    high_risk = df_inv_risk[high_risk_condition].sort_values('Value_at_Cost', ascending=False)
+                else:
+                    high_risk = pd.DataFrame()  # Empty dataframe jika kolom tidak ada
                 
                 if not high_risk.empty:
-                    st.warning(f"⚠️ {len(high_risk)} high-value slow-moving items detected")
-    
-                    # Pastikan kolom yang diperlukan ada
-                    available_cols = []
+                    st.warning(f"⚠️ **{len(high_risk)} high-value slow-moving items detected**")
+                    
+                    # Pilih kolom yang tersedia untuk ditampilkan
+                    display_cols_risk = []
                     for col in ['SKU_ID', 'Product_Name', 'Cover_Months', 'Value_at_Cost', 'Inventory_Status']:
                         if col in high_risk.columns:
-                            available_cols.append(col)
-    
-                    if available_cols:
-                    # Tambahkan product info jika Product_Name tidak ada
-                    if 'Product_Name' not in available_cols and 'SKU_ID' in high_risk.columns:
-                        high_risk = add_product_info_to_data(high_risk, df_product)
-                        available_cols = [col for col in ['SKU_ID', 'Product_Name', 'Cover_Months', 
-                                                        'Value_at_Cost', 'Inventory_Status'] 
-                                        if col in high_risk.columns]
-        
-                    st.dataframe(
-                        high_risk[available_cols],
-                        use_container_width=True
-                    )
-                else:
-                    st.warning("No valid columns available for display")
+                            display_cols_risk.append(col)
+                    
+                    if display_cols_risk:
+                        st.dataframe(
+                            high_risk[display_cols_risk],
+                            use_container_width=True
+                        )
+                    else:
+                        st.warning("No display columns available for risk items")
                 else:
                     st.success("✅ No high-risk inventory items detected")
         
         st.divider()
-        # Detailed Inventory Table
+        
+        # ================ DETAILED INVENTORY TABLE ================
         st.subheader("📋 Detailed Inventory Status")
         
         # Filter options
-        col_f1, col_f2 = st.columns(2)
+        col_f1, col_f2, col_f3 = st.columns(3)
         with col_f1:
             status_filter = st.multiselect(
                 "Filter by Status",
                 options=['Need Replenishment', 'Ideal/Healthy', 'High Stock'],
-                default=['Need Replenishment', 'High Stock']
+                default=['Need Replenishment', 'High Stock'],
+                key="inv_status_filter"
             )
         
         with col_f2:
+            tier_options = inv_df['SKU_Tier'].unique().tolist() if 'SKU_Tier' in inv_df.columns else []
             tier_filter = st.multiselect(
                 "Filter by Tier",
-                options=inv_df['SKU_Tier'].unique().tolist() if 'SKU_Tier' in inv_df.columns else [],
-                default=inv_df['SKU_Tier'].unique().tolist() if 'SKU_Tier' in inv_df.columns else []
+                options=tier_options,
+                default=tier_options,
+                key="inv_tier_filter"
+            )
+        
+        with col_f3:
+            brand_options = inv_df['Brand'].unique().tolist() if 'Brand' in inv_df.columns else []
+            brand_filter = st.multiselect(
+                "Filter by Brand",
+                options=brand_options,
+                default=brand_options,
+                key="inv_brand_filter"
             )
         
         # Apply filters
         filtered_df = inv_df.copy()
+        
         if status_filter:
             filtered_df = filtered_df[filtered_df['Inventory_Status'].isin(status_filter)]
+        
         if tier_filter and 'SKU_Tier' in filtered_df.columns:
             filtered_df = filtered_df[filtered_df['SKU_Tier'].isin(tier_filter)]
-
-        # GUARANTEE PRODUCT_NAME EXISTS - ALWAYS MERGE WITH PRODUCT MASTER
-        filtered_df = add_product_info_to_data(filtered_df, df_product)
-
+        
+        if brand_filter and 'Brand' in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df['Brand'].isin(brand_filter)]
+        
+        # Pastikan Product_Name selalu ada
+        if 'Product_Name' not in filtered_df.columns:
+            filtered_df = add_product_info_to_data(filtered_df, df_product)
+        
         # Reapply filters setelah merge (jika diperlukan)
         if status_filter:
             filtered_df = filtered_df[filtered_df['Inventory_Status'].isin(status_filter)]
+        
         if tier_filter and 'SKU_Tier' in filtered_df.columns:
             filtered_df = filtered_df[filtered_df['SKU_Tier'].isin(tier_filter)]
-
-        # Prepare display columns - WAJIB dengan Product_Name
-        display_cols = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier', 'Inventory_Status', 
-                       'Stock_Qty', 'Avg_Monthly_Sales_3M', 'Cover_Months']
-
+        
+        if brand_filter and 'Brand' in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df['Brand'].isin(brand_filter)]
+        
+        # Prepare display columns
+        base_display_cols = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier', 'Inventory_Status', 
+                           'Stock_Qty', 'Avg_Monthly_Sales_3M', 'Cover_Months']
+        
+        # Tambahkan financial columns jika ada
+        financial_cols = []
+        if not df_inventory_financial.empty:
+            # Merge dengan financial data
+            filtered_df = pd.merge(
+                filtered_df,
+                df_inventory_financial[['SKU_ID', 'Value_at_Cost', 'Value_at_Retail', 'Potential_Margin']],
+                on='SKU_ID',
+                how='left'
+            )
+            financial_cols = ['Value_at_Cost', 'Value_at_Retail', 'Potential_Margin']
+        
+        display_cols = base_display_cols + financial_cols
+        
+        # Filter hanya kolom yang ada
         available_cols = [col for col in display_cols if col in filtered_df.columns]
-
+        
         # Pastikan Product_Name selalu ada
         if 'Product_Name' not in available_cols:
             # Coba cari kolom serupa
@@ -2864,19 +2916,47 @@ with tab3:
             if product_name_cols:
                 available_cols.insert(1, product_name_cols[0])
             else:
+                # Tambahkan Product_Name meskipun tidak ada di dataframe
                 available_cols.insert(1, 'Product_Name')
-
+                # Add dummy column
+                filtered_df['Product_Name'] = 'N/A'
+        
         # Format the dataframe
         display_df = filtered_df[available_cols].copy()
-
-        # Add formatted columns
+        
+        # Format columns
         if 'Cover_Months' in display_df.columns:
-            display_df['Cover_Months'] = display_df['Cover_Months'].apply(lambda x: f"{x:.1f}" if x < 999 else "N/A")
-
+            display_df['Cover_Months'] = display_df['Cover_Months'].apply(
+                lambda x: f"{x:.1f}" if pd.notnull(x) and x < 999 else "N/A"
+            )
+        
         if 'Avg_Monthly_Sales_3M' in display_df.columns:
-            display_df['Avg_Monthly_Sales_3M'] = display_df['Avg_Monthly_Sales_3M'].apply(lambda x: f"{x:.0f}")
-
-        # Rename columns for display - WAJIB dengan Product Name
+            display_df['Avg_Monthly_Sales_3M'] = display_df['Avg_Monthly_Sales_3M'].apply(
+                lambda x: f"{x:.0f}" if pd.notnull(x) else "0"
+            )
+        
+        if 'Stock_Qty' in display_df.columns:
+            display_df['Stock_Qty'] = display_df['Stock_Qty'].apply(
+                lambda x: f"{x:,.0f}" if pd.notnull(x) else "0"
+            )
+        
+        # Format financial columns
+        if 'Value_at_Cost' in display_df.columns:
+            display_df['Value_at_Cost'] = display_df['Value_at_Cost'].apply(
+                lambda x: f"${x:,.0f}" if pd.notnull(x) else "$0"
+            )
+        
+        if 'Value_at_Retail' in display_df.columns:
+            display_df['Value_at_Retail'] = display_df['Value_at_Retail'].apply(
+                lambda x: f"${x:,.0f}" if pd.notnull(x) else "$0"
+            )
+        
+        if 'Potential_Margin' in display_df.columns:
+            display_df['Potential_Margin'] = display_df['Potential_Margin'].apply(
+                lambda x: f"${x:,.0f}" if pd.notnull(x) else "$0"
+            )
+        
+        # Rename columns for display
         column_names = {
             'SKU_ID': 'SKU ID',
             'Product_Name': 'Product Name',
@@ -2885,25 +2965,44 @@ with tab3:
             'Inventory_Status': 'Status',
             'Stock_Qty': 'Stock Available',
             'Avg_Monthly_Sales_3M': 'Avg Sales (3M)',
-            'Cover_Months': 'Cover (Months)'
+            'Cover_Months': 'Cover (Months)',
+            'Value_at_Cost': 'Value @ Cost',
+            'Value_at_Retail': 'Value @ Retail',
+            'Potential_Margin': 'Potential Margin'
         }
-
-        # Handle jika nama kolom berbeda
-        for col in display_df.columns:
-            if col not in column_names:
-                if 'product' in col.lower() or 'name' in col.lower():
-                    column_names[col] = 'Product Name'
-
+        
+        # Filter hanya kolom yang ada
+        column_names = {k: v for k, v in column_names.items() if k in display_df.columns}
+        
         display_df = display_df.rename(columns=column_names)
         
         # Sort by status and cover months
         if 'Cover (Months)' in display_df.columns and 'Status' in display_df.columns:
             # Convert back to numeric for sorting
-            display_df['Cover_Numeric'] = pd.to_numeric(display_df['Cover (Months)'].replace('N/A', np.nan), errors='coerce')
-            display_df = display_df.sort_values(['Status', 'Cover_Numeric'], 
-                                               ascending=[True, False if 'High' in status_filter else True])
-            display_df = display_df.drop('Cover_Numeric', axis=1)
-
+            try:
+                display_df['Cover_Numeric'] = pd.to_numeric(
+                    display_df['Cover (Months)'].replace('N/A', np.nan), 
+                    errors='coerce'
+                )
+                
+                # Determine sort order based on status filter
+                if 'High Stock' in status_filter:
+                    cover_sort_ascending = False  # High stock first
+                elif 'Need Replenishment' in status_filter:
+                    cover_sort_ascending = True  # Low stock first
+                else:
+                    cover_sort_ascending = True
+                
+                display_df = display_df.sort_values(
+                    ['Status', 'Cover_Numeric'], 
+                    ascending=[True, cover_sort_ascending]
+                )
+                display_df = display_df.drop('Cover_Numeric', axis=1)
+            except:
+                # If sorting fails, just sort by Status
+                display_df = display_df.sort_values('Status')
+        
+        # Display dataframe
         st.dataframe(
             display_df,
             use_container_width=True,
@@ -2911,7 +3010,68 @@ with tab3:
         )
         
         # Summary statistics
-        st.caption(f"**Showing {len(filtered_df)} of {len(inv_df)} SKUs** | **Average Cover:** {inv_df[inv_df['Cover_Months'] < 999]['Cover_Months'].mean():.1f} months")        
+        st.caption(f"""
+        **Showing {len(filtered_df)} of {len(inv_df)} SKUs** | 
+        **Average Cover:** {inv_df[inv_df['Cover_Months'] < 999]['Cover_Months'].mean():.1f} months | 
+        **Total Stock Value:** ${total_cost_value:,.0f} (@Cost)
+        """)
+        
+        # Download button untuk filtered data
+        if not filtered_df.empty:
+            csv = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Filtered Inventory Data",
+                data=csv,
+                file_name=f"inventory_analysis_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        
+        # ================ INVENTORY HEALTH CHART ================
+        st.divider()
+        st.subheader("📊 Inventory Health Overview")
+        
+        if 'Inventory_Status' in inv_df.columns:
+            # Pie chart for inventory status
+            status_summary = inv_df['Inventory_Status'].value_counts().reset_index()
+            status_summary.columns = ['Status', 'Count']
+            
+            fig_pie = px.pie(
+                status_summary, 
+                values='Count', 
+                names='Status',
+                title='Inventory Status Distribution',
+                color='Status',
+                color_discrete_map={
+                    'Need Replenishment': '#FF5252',
+                    'Ideal/Healthy': '#4CAF50',
+                    'High Stock': '#FF9800'
+                }
+            )
+            
+            fig_pie.update_layout(height=400)
+            st.plotly_chart(fig_pie, use_container_width=True)
+            
+            # Bar chart for cover months by tier
+            if 'SKU_Tier' in inv_df.columns:
+                tier_cover = inv_df.groupby('SKU_Tier')['Cover_Months'].mean().reset_index()
+                tier_cover = tier_cover[tier_cover['Cover_Months'] < 999]  # Exclude infinite values
+                
+                fig_bar = px.bar(
+                    tier_cover,
+                    x='SKU_Tier',
+                    y='Cover_Months',
+                    title='Average Cover Months by Tier',
+                    color='Cover_Months',
+                    color_continuous_scale='RdYlGn_r',  # Red for high, Green for low
+                    text_auto='.1f'
+                )
+                
+                fig_bar.update_layout(height=300)
+                st.plotly_chart(fig_bar, use_container_width=True)
+    
+    else:
+        st.warning("No inventory metrics available. Please check your data.")
 
 # --- TAB 4: SKU EVALUATION ---
 with tab4:
