@@ -4239,14 +4239,22 @@ with tab7:
                     display_months = sales_months[-hist_months:]
                     hist_sales = hist_sales[hist_sales['Month'].isin(display_months)]
                 
-                # Aggregate by month
+                # Aggregate by month - FIXED: Only use Sales_Qty, not Revenue
                 if not hist_sales.empty:
                     monthly_hist = hist_sales.groupby('Month').agg({
-                        'Sales_Qty': 'sum',
-                        'Revenue': 'sum' if 'Revenue' in hist_sales.columns else None
+                        'Sales_Qty': 'sum'
                     }).reset_index()
                     monthly_hist = monthly_hist.sort_values('Month')
                     monthly_hist['Month_Label'] = monthly_hist['Month'].apply(lambda x: x.strftime('%b-%y'))
+                    
+                    # Tambahkan revenue jika floor price tersedia
+                    if 'Floor_Price' in df_product.columns:
+                        # Gabungkan dengan floor price dari product master
+                        hist_sales_with_price = add_product_info_to_data(hist_sales, df_product)
+                        if 'Floor_Price' in hist_sales_with_price.columns:
+                            hist_sales_with_price['Revenue'] = hist_sales_with_price['Sales_Qty'] * hist_sales_with_price['Floor_Price'].fillna(0)
+                            monthly_revenue = hist_sales_with_price.groupby('Month')['Revenue'].sum().reset_index()
+                            monthly_hist = pd.merge(monthly_hist, monthly_revenue, on='Month', how='left')
                     
                     # Create historical chart
                     fig_hist = go.Figure()
@@ -4262,7 +4270,7 @@ with tab7:
                         hovertemplate='<b>%{x}</b><br>Sales: %{y:,.0f} units<extra></extra>'
                     ))
                     
-                    # Add revenue if available
+                    # Add revenue jika ada
                     if 'Revenue' in monthly_hist.columns and monthly_hist['Revenue'].sum() > 0:
                         fig_hist.add_trace(go.Scatter(
                             x=monthly_hist['Month_Label'],
