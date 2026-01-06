@@ -4361,11 +4361,33 @@ with tab7:
             peak_month = monthly_df.loc[monthly_df['Quantity'].idxmax()]
             insights.append(f"**🎯 Peak Month:** {peak_month['Month_Display']} ({format_number(peak_month['Quantity'])} units)")
         
-        # Insight 4: Top brand
+        # Insight 4: Top brand - FIXED
         if 'brand_df' in locals() and not brand_df.empty:
             top_brand = brand_df.iloc[0]
-            brand_share = (float(str(top_brand['Qty']).replace(',', '')) / total_qty * 100) if total_qty > 0 else 0
-            insights.append(f"**🏆 Top Brand:** {top_brand['Brand']} ({format_number(top_brand['Qty'])} units, {brand_share:.1f}%)")
+    
+            # Cari kolom yang benar untuk quantity
+            qty_value = 0
+            # Coba berbagai kemungkinan nama kolom
+            possible_qty_cols = ['Qty', 'Quantity', 'Total_Qty', 'Forecast_Qty', '2026_Forecast', 'Historical_Sales']
+    
+            for col in possible_qty_cols:
+                if col in top_brand.index:
+                    qty_value = top_brand[col]
+                    break
+    
+            # Jika tidak ditemukan, cari kolom pertama yang numeric selain 'Brand' dan 'SKU_Count'
+            if qty_value == 0:
+                for col in top_brand.index:
+                    if col not in ['Brand', 'SKU_Count'] and pd.api.types.is_numeric_dtype(type(top_brand[col])):
+                        qty_value = top_brand[col]
+                        break
+    
+            # Hitung share
+            if total_qty > 0 and qty_value > 0:
+                brand_share = (qty_value / total_qty * 100)
+                insights.append(f"**🏆 Top Brand:** {top_brand['Brand']} ({qty_value:,.0f} units, {brand_share:.1f}%)")
+            else:
+                insights.append(f"**🏆 Top Brand:** {top_brand['Brand']} ({qty_value:,.0f} units)")
         
         # Display insights
         for insight in insights:
