@@ -1329,8 +1329,8 @@ with st.sidebar:
         total_margin = df_financial['Gross_Margin'].sum()
         avg_margin_pct = (total_margin / total_revenue * 100) if total_revenue > 0 else 0
         
-        st.metric("Total Revenue", f"${total_revenue:,.0f}")
-        st.metric("Total Margin", f"${total_margin:,.0f}")
+        st.metric("Total Revenue", f"Rp {total_revenue:,.0f}")
+        st.metric("Total Margin", f"Rp {total_margin:,.0f}")
         st.metric("Avg Margin %", f"{avg_margin_pct:.1f}%")
     
     st.markdown("---")
@@ -2178,8 +2178,8 @@ with tab2:
                 st.dataframe(
                     brand_financial.head(10),
                     column_config={
-                        "Revenue": st.column_config.NumberColumn("Revenue", format="$ %.0f"),
-                        "Gross_Margin": st.column_config.NumberColumn("Gross Margin", format="$ %.0f"),
+                        "Revenue": st.column_config.NumberColumn("Revenue", format="Rp  %.0f"),
+                        "Gross_Margin": st.column_config.NumberColumn("Gross Margin", format="Rp  %.0f"),
                         "Margin_Percentage": st.column_config.ProgressColumn("Margin %", format="%.1f%%", min_value=0, max_value=100)
                     },
                     use_container_width=True
@@ -2810,13 +2810,13 @@ with tab3:
             col_fin1, col_fin2, col_fin3, col_fin4 = st.columns(4)
             
             with col_fin1:
-                st.metric("Inventory @ Cost", f"${total_cost_value:,.0f}")
+                st.metric("Inventory @ Cost", f"Rp {total_cost_value:,.0f}")
             
             with col_fin2:
-                st.metric("Inventory @ Retail", f"${total_retail_value:,.0f}")
+                st.metric("Inventory @ Retail", f"Rp {total_retail_value:,.0f}")
             
             with col_fin3:
-                st.metric("Potential Margin", f"${total_potential_margin:,.0f}")
+                st.metric("Potential Margin", f"Rp {total_potential_margin:,.0f}")
             
             with col_fin4:
                 st.metric("Avg Margin %", f"{avg_margin_pct:.1f}%")
@@ -2837,9 +2837,9 @@ with tab3:
                 st.dataframe(
                     high_value_items[display_cols_high_value],
                     column_config={
-                        "Value_at_Cost": st.column_config.NumberColumn("Value @ Cost", format="$ %.0f"),
-                        "Value_at_Retail": st.column_config.NumberColumn("Value @ Retail", format="$ %.0f"),
-                        "Potential_Margin": st.column_config.NumberColumn("Potential Margin", format="$ %.0f")
+                        "Value_at_Cost": st.column_config.NumberColumn("Value @ Cost", format="Rp  %.0f"),
+                        "Value_at_Retail": st.column_config.NumberColumn("Value @ Retail", format="Rp  %.0f"),
+                        "Potential_Margin": st.column_config.NumberColumn("Potential Margin", format="Rp  %.0f")
                     } if 'Value_at_Cost' in display_cols_high_value else {},
                     use_container_width=True
                 )
@@ -2867,7 +2867,7 @@ with tab3:
                 # Flag high risk items
                 high_risk_condition = (
                     (df_inv_risk['Cover_Months'] > 3) &  # Slow moving (>3 months cover)
-                    (df_inv_risk['Value_at_Cost'] > 1000)  # High value (>$1000)
+                    (df_inv_risk['Value_at_Cost'] > 1000)  # High value (>Rp 1000)
                 )
                 
                 # Filter hanya jika kolomnya ada
@@ -3009,17 +3009,17 @@ with tab3:
         # Format financial columns
         if 'Value_at_Cost' in display_df.columns:
             display_df['Value_at_Cost'] = display_df['Value_at_Cost'].apply(
-                lambda x: f"${x:,.0f}" if pd.notnull(x) else "$0"
+                lambda x: f"Rp {x:,.0f}" if pd.notnull(x) else "Rp 0"
             )
         
         if 'Value_at_Retail' in display_df.columns:
             display_df['Value_at_Retail'] = display_df['Value_at_Retail'].apply(
-                lambda x: f"${x:,.0f}" if pd.notnull(x) else "$0"
+                lambda x: f"Rp {x:,.0f}" if pd.notnull(x) else "Rp 0"
             )
         
         if 'Potential_Margin' in display_df.columns:
             display_df['Potential_Margin'] = display_df['Potential_Margin'].apply(
-                lambda x: f"${x:,.0f}" if pd.notnull(x) else "$0"
+                lambda x: f"Rp {x:,.0f}" if pd.notnull(x) else "Rp 0"
             )
         
         # Rename columns for display
@@ -3079,7 +3079,7 @@ with tab3:
         st.caption(f"""
         **Showing {len(filtered_df)} of {len(inv_df)} SKUs** | 
         **Average Cover:** {inv_df[inv_df['Cover_Months'] < 999]['Cover_Months'].mean():.1f} months | 
-        **Total Stock Value:** ${total_cost_value:,.0f} (@Cost)
+        **Total Stock Value:** Rp {total_cost_value:,.0f} (@Cost)
         """)
         
         # Download button untuk filtered data
@@ -3260,10 +3260,10 @@ with tab4:
         
         # Format financial columns
         if 'Revenue' in eval_df.columns:
-            eval_df['Revenue'] = eval_df['Revenue'].apply(lambda x: f"${x:,.0f}" if pd.notnull(x) else "$0")
+            eval_df['Revenue'] = eval_df['Revenue'].apply(lambda x: f"Rp {x:,.0f}" if pd.notnull(x) else "Rp 0")
         
         if 'Gross_Margin' in eval_df.columns:
-            eval_df['Gross_Margin'] = eval_df['Gross_Margin'].apply(lambda x: f"${x:,.0f}" if pd.notnull(x) else "$0")
+            eval_df['Gross_Margin'] = eval_df['Gross_Margin'].apply(lambda x: f"Rp {x:,.0f}" if pd.notnull(x) else "Rp 0")
         
         if 'Margin_Percentage' in eval_df.columns:
             eval_df['Margin_Percentage'] = eval_df['Margin_Percentage'].apply(lambda x: f"{x:.1f}%" if pd.notnull(x) else "0%")
@@ -4074,7 +4074,7 @@ with tab7:
             st.metric("Total Forecast Qty", f"{format_number(total_qty)}")
         
         with col_kpi3:
-            st.metric("Total Forecast Value", f"${format_number(total_value)}")
+            st.metric("Total Forecast Value", f"Rp {format_number(total_value)}")
         
         with col_kpi4:
             avg_monthly = total_qty / len(ecomm_forecast_month_cols) if ecomm_forecast_month_cols else 0
@@ -4155,11 +4155,11 @@ with tab7:
             fig.add_trace(go.Scatter(
                 x=monthly_df['Month_Display'],
                 y=monthly_df['Value'],
-                name='Value ($)',
+                name='Value (Rp )',
                 mode='lines+markers',
                 line=dict(color='#FF9800', width=3),
                 marker=dict(size=8, color='#FF9800'),
-                hovertemplate='<b>%{x}</b><br>Value: $%{y:,.0f}<extra></extra>',
+                hovertemplate='<b>%{x}</b><br>Value: Rp %{y:,.0f}<extra></extra>',
                 yaxis='y2'
             ))
         
@@ -4184,7 +4184,7 @@ with tab7:
         # Add secondary axis if showing value
         if show_value and 'Value' in monthly_df.columns and monthly_df['Value'].sum() > 0:
             layout_config['yaxis2'] = {
-                'title': 'Value ($)',
+                'title': 'Value (Rp )',
                 'overlaying': 'y',
                 'side': 'right'
             }
@@ -4252,9 +4252,9 @@ with tab7:
                     fig_brand_value.add_trace(go.Bar(
                         x=brand_df['Brand'].head(10),
                         y=brand_df['Value'].head(10),
-                        name='Value ($)',
+                        name='Value (Rp )',
                         marker_color='#FF9800',
-                        text=brand_df['Value'].head(10).apply(lambda x: f"${format_number(x)}"),
+                        text=brand_df['Value'].head(10).apply(lambda x: f"Rp {format_number(x)}"),
                         textposition='auto'
                     ))
                     
@@ -4262,7 +4262,7 @@ with tab7:
                         height=400,
                         title='Top 10 Brands by Value',
                         xaxis_title='Brand',
-                        yaxis_title='Value ($)',
+                        yaxis_title='Value (Rp )',
                         plot_bgcolor='white'
                     )
                     st.plotly_chart(fig_brand_value, use_container_width=True)
@@ -4273,7 +4273,7 @@ with tab7:
             st.markdown("#### 📋 Brand Summary")
             display_brand_df = brand_df.copy()
             display_brand_df['Qty'] = display_brand_df['Qty'].apply(format_number)
-            display_brand_df['Value'] = display_brand_df['Value'].apply(lambda x: f"${format_number(x)}")
+            display_brand_df['Value'] = display_brand_df['Value'].apply(lambda x: f"Rp {format_number(x)}")
             display_brand_df['Qty_Share'] = (display_brand_df['Qty'].str.replace(',', '').astype(float) / total_qty * 100).apply(lambda x: f"{x:.1f}%")
             
             st.dataframe(
@@ -4349,7 +4349,7 @@ with tab7:
         insights = []
         
         # Insight 1: Total forecast
-        insights.append(f"**📊 Total Forecast:** {format_number(total_qty)} units (${format_number(total_value)})")
+        insights.append(f"**📊 Total Forecast:** {format_number(total_qty)} units (Rp {format_number(total_value)})")
         
         # Insight 2: Monthly average
         if len(ecomm_forecast_month_cols) > 0:
@@ -4406,11 +4406,11 @@ with tab8:
         
         with col1:
             total_revenue = df_financial['Revenue'].sum()
-            st.metric("Total Revenue", f"${total_revenue:,.0f}")
+            st.metric("Total Revenue", f"Rp {total_revenue:,.0f}")
         
         with col2:
             total_margin = df_financial['Gross_Margin'].sum()
-            st.metric("Total Gross Margin", f"${total_margin:,.0f}")
+            st.metric("Total Gross Margin", f"Rp {total_margin:,.0f}")
         
         with col3:
             avg_margin_pct = (total_margin / total_revenue * 100) if total_revenue > 0 else 0
@@ -4419,7 +4419,7 @@ with tab8:
         with col4:
             total_units = df_financial['Sales_Qty'].sum()
             avg_price = total_revenue / total_units if total_units > 0 else 0
-            st.metric("Avg Selling Price", f"${avg_price:.2f}")
+            st.metric("Avg Selling Price", f"Rp {avg_price:.2f}")
         
         # 2. INVENTORY VALUE (Real Impact!)
         st.divider()
@@ -4434,13 +4434,13 @@ with tab8:
             col_inv1, col_inv2, col_inv3, col_inv4 = st.columns(4)
             
             with col_inv1:
-                st.metric("Inventory @ Cost", f"${total_cost_value:,.0f}")
+                st.metric("Inventory @ Cost", f"Rp {total_cost_value:,.0f}")
             
             with col_inv2:
-                st.metric("Inventory @ Retail", f"${total_retail_value:,.0f}")
+                st.metric("Inventory @ Retail", f"Rp {total_retail_value:,.0f}")
             
             with col_inv3:
-                st.metric("Potential Margin", f"${total_potential_margin:,.0f}")
+                st.metric("Potential Margin", f"Rp {total_potential_margin:,.0f}")
             
             with col_inv4:
                 st.metric("Inventory Margin %", f"{inventory_margin_pct:.1f}%")
@@ -4453,9 +4453,9 @@ with tab8:
                 high_value_skus[['SKU_ID', 'Product_Name', 'Brand', 'Stock_Qty', 
                                'Value_at_Cost', 'Value_at_Retail', 'Potential_Margin', 'Margin_Percentage']],
                 column_config={
-                    "Value_at_Cost": st.column_config.NumberColumn("Value @ Cost", format="$ %.0f"),
-                    "Value_at_Retail": st.column_config.NumberColumn("Value @ Retail", format="$ %.0f"),
-                    "Potential_Margin": st.column_config.NumberColumn("Potential Margin", format="$ %.0f"),
+                    "Value_at_Cost": st.column_config.NumberColumn("Value @ Cost", format="Rp  %.0f"),
+                    "Value_at_Retail": st.column_config.NumberColumn("Value @ Retail", format="Rp  %.0f"),
+                    "Potential_Margin": st.column_config.NumberColumn("Potential Margin", format="Rp  %.0f"),
                     "Margin_Percentage": st.column_config.ProgressColumn("Margin %", format="%.1f%%", min_value=0, max_value=100)
                 },
                 use_container_width=True
@@ -4494,7 +4494,7 @@ with tab8:
         
         fig.update_layout(
             title='Monthly Revenue vs Margin %',
-            yaxis=dict(title='Revenue ($)'),
+            yaxis=dict(title='Revenue (Rp )'),
             yaxis2=dict(title='Margin %', overlaying='y', side='right'),
             height=400
         )
@@ -4510,8 +4510,8 @@ with tab8:
                 profitability_segments.head(10)[['SKU_ID', 'Product_Name', 'Brand', 
                                                'Sales_Qty', 'Revenue', 'Gross_Margin', 'Margin_Percentage', 'Margin_Segment']],
                 column_config={
-                    "Revenue": st.column_config.NumberColumn("Revenue", format="$ %.0f"),
-                    "Gross_Margin": st.column_config.NumberColumn("Gross Margin", format="$ %.0f"),
+                    "Revenue": st.column_config.NumberColumn("Revenue", format="Rp  %.0f"),
+                    "Gross_Margin": st.column_config.NumberColumn("Gross Margin", format="Rp  %.0f"),
                     "Margin_Percentage": st.column_config.ProgressColumn("Margin %", format="%.1f%%", min_value=0, max_value=100)
                 },
                 use_container_width=True
@@ -4622,7 +4622,7 @@ with tab8:
             negative_margin_skus = profitability_segments[profitability_segments['Margin_Segment'] == 'Negative Margin']
             
             if not high_margin_skus.empty:
-                recommendations.append(f"✅ **Focus on High Margin SKUs:** {len(high_margin_skus)} SKUs with >40% margin contribute ${high_margin_skus['Gross_Margin'].sum():,.0f} margin")
+                recommendations.append(f"✅ **Focus on High Margin SKUs:** {len(high_margin_skus)} SKUs with >40% margin contribute Rp {high_margin_skus['Gross_Margin'].sum():,.0f} margin")
             
             if not low_margin_skus.empty:
                 recommendations.append(f"⚠️ **Review Low Margin SKUs:** {len(low_margin_skus)} SKUs with <20% margin")
@@ -4638,7 +4638,7 @@ with tab8:
             ]
             
             if not slow_moving_high_value.empty:
-                recommendations.append(f"📉 **Inventory Risk:** {len(slow_moving_high_value)} high-value items (>$1000) with high stock levels")
+                recommendations.append(f"📉 **Inventory Risk:** {len(slow_moving_high_value)} high-value items (>Rp 1000) with high stock levels")
         
         # Display recommendations
         if recommendations:
