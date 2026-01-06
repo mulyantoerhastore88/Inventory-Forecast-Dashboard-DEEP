@@ -3872,639 +3872,280 @@ with tab6:
     else:
         st.warning("No data available for selected dataset")
 
-# --- TAB 7: ROFO VALIDATION & ANALYSIS DASHBOARD (UPDATED VERSION) ---
+# --- TAB 7: SMART FORECAST GENERATOR & SIMULATOR ---
 with tab7:
-    st.subheader("🔍 Rofo Validation & Analysis Dashboard")
-    st.markdown("**Validate and analyze your Excel-calculated Rofo forecasts**")
-    
-    # ================ INISIALISASI DATA ================
-    use_fallback_data = False
-    
-    # Jika rofo_onwards kosong, coba buat dari forecast data
-    if df_rofo_onwards.empty:
-        st.warning("⚠️ **Rofo_onwards sheet not found** - Using forecast data as fallback")
+    st.subheader("🔮 Smart Forecast Generator & Simulator")
+    st.markdown("Generate new forecasts based on historical sales trends and simulation parameters.")
+
+    # ================ 1. PARAMETER SETTINGS ================
+    with st.expander("⚙️ Generator Settings", expanded=True):
+        col_set1, col_set2, col_set3, col_set4 = st.columns(4)
         
-        if not df_forecast.empty:
-            try:
-                # Transform forecast data to rofo_onwards format
-                forecast_pivot = df_forecast.pivot_table(
-                    index=['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier'],
-                    columns='Month',
-                    values='Forecast_Qty',
-                    aggfunc='sum',
-                    fill_value=0
-                ).reset_index()
+        with col_set1:
+            # Pilih metode forecast
+            forecast_method = st.selectbox(
+                "Forecast Method",
+                options=[
+                    "Moving Average (Last 3 Months)", 
+                    "Moving Average (Last 6 Months)",
+                    "Last Month Run Rate (Aggressive)",
+                    "Seasonal Naive (Last Year Same Month)"
+                ],
+                help="Base logic to calculate baseline forecast"
+            )
+            
+        with col_set2:
+            # Target Growth
+            growth_scenario = st.slider(
+                "Growth Scenario (%)", 
+                min_value=-50, 
+                max_value=100, 
+                value=10,
+                step=5,
+                help="Apply growth or decline percentage to the baseline"
+            )
+            
+        with col_set3:
+            # Safety Stock
+            safety_stock_weeks = st.slider(
+                "Safety Stock Target (Weeks)",
+                min_value=0,
+                max_value=8,
+                value=2,
+                help="Additional stock buffer to recommend in PO"
+            )
+            
+        with col_set4:
+            # Horizon
+            forecast_horizon = st.selectbox(
+                "Forecast Horizon",
+                options=[1, 2, 3, 6],
+                index=2,
+                format_func=lambda x: f"{x} Months Ahead"
+            )
+
+    # ================ 2. DATA PROCESSING & GENERATION ================
+    
+    if not df_sales.empty:
+        # 1. Prepare Base Data (Sales per SKU per Month)
+        # Ambil 12 bulan terakhir data sales untuk kalkulasi
+        sales_sorted_months = sorted(df_sales['Month'].unique())
+        last_12_months = sales_sorted_months[-12:] if len(sales_sorted_months) >= 12 else sales_sorted_months
+        
+        df_sales_hist = df_sales[df_sales['Month'].isin(last_12_months)].copy()
+        
+        # Pivot untuk mendapatkan sales per bulan kolom
+        sales_pivot = df_sales_hist.pivot_table(
+            index='SKU_ID', 
+            columns='Month', 
+            values='Sales_Qty', 
+            aggfunc='sum', 
+            fill_value=0
+        )
+        
+        # 2. Calculate Baseline Forecast per SKU
+        generated_forecasts = []
+        
+        # Determine next months names
+        last_history_date = sales_sorted_months[-1]
+        next_months = []
+        for i in range(1, forecast_horizon + 1):
+            next_date = last_history_date + relativedelta(months=i)
+            next_months.append(next_date)
+            
+        # Iterate through SKUs
+        for sku_id in sales_pivot.index:
+            sku_history = sales_pivot.loc[sku_id]
+            baseline = 0
+            
+            # Logic Calculation
+            if "Last 3 Months" in forecast_method:
+                baseline = sku_history.tail(3).mean()
+            elif "Last 6 Months" in forecast_method:
+                baseline = sku_history.tail(6).mean()
+            elif "Last Month" in forecast_method:
+                baseline = sku_history.iloc[-1]
+            elif "Seasonal" in forecast_method:
+                # Fallback ke rata-rata jika data tahun lalu tidak ada
+                baseline = sku_history.mean() 
+            
+            # Apply Growth
+            final_forecast = baseline * (1 + growth_scenario/100)
+            
+            # Store data
+            row_data = {'SKU_ID': sku_id}
+            
+            # Generate monthly columns
+            for m in next_months:
+                row_data[m] = round(final_forecast)
                 
-                # Rename columns to month format
-                forecast_pivot.columns.name = None
-                for col in forecast_pivot.columns:
-                    if isinstance(col, datetime):
-                        new_name = col.strftime('%b-%y')
-                        forecast_pivot = forecast_pivot.rename(columns={col: new_name})
-                
-                # Get month columns
-                rofo_onwards_month_cols = [col for col in forecast_pivot.columns 
-                                         if any(m in col.lower() for m in 
-                                               ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 
-                                                'jul', 'aug', 'sep', 'oct', 'nov', 'dec'])]
-                
-                if rofo_onwards_month_cols:
-                    df_rofo_onwards = forecast_pivot
-                    use_fallback_data = True
-                    st.success(f"✅ Created fallback data: {len(df_rofo_onwards)} SKUs, {len(rofo_onwards_month_cols)} months")
-            except Exception as e:
-                st.error(f"❌ Error creating fallback data: {str(e)}")
+            generated_forecasts.append(row_data)
+            
+        # Create Forecast DataFrame
+        df_gen_forecast = pd.DataFrame(generated_forecasts)
+        
+        # 3. Add Product Info & Stock
+        df_gen_forecast = add_product_info_to_data(df_gen_forecast, df_product)
+        
+        # Merge current stock
+        if not df_stock.empty:
+            df_gen_forecast = pd.merge(
+                df_gen_forecast, 
+                df_stock[['SKU_ID', 'Stock_Qty']], 
+                on='SKU_ID', 
+                how='left'
+            )
+            df_gen_forecast['Stock_Qty'] = df_gen_forecast['Stock_Qty'].fillna(0)
         else:
-            st.error("❌ No forecast data available either!")
-            st.stop()
-    else:
-        st.success(f"✅ Rofo_onwards data loaded: {len(df_rofo_onwards)} SKUs, {len(rofo_onwards_month_cols)} months")
-    
-    # ================ FUNGSI BANTU ================
-    def format_number(value):
-        """Format angka dengan koma, tanpa desimal"""
-        try:
-            if pd.isna(value):
-                return "0"
-            value = float(value)
-            if value == 0:
-                return "0"
-            elif abs(value) >= 1000:
-                return f"{value:,.0f}"
-            else:
-                return f"{value:.0f}"
-        except:
-            return str(value)
-    
-    def parse_rofo_month(month_str):
-        """Parse bulan dari string format"""
-        try:
-            month_str = str(month_str).upper()
-            if '-' in month_str:
-                month_part, year_part = month_str.split('-')
-                month_num = datetime.strptime(month_part[:3], '%b').month
-                year = 2000 + int(year_part) if len(year_part) == 2 else int(year_part)
-                return datetime(year, month_num, 1)
-            return datetime.now()
-        except:
-            return datetime.now()
-    
-    def calculate_quarter(month_date):
-        """Tentukan quarter dari bulan"""
-        if isinstance(month_date, str):
-            month_date = parse_rofo_month(month_date)
-        quarter = (month_date.month - 1) // 3 + 1
-        return f"Q{quarter}-{month_date.strftime('%y')}"
-    
-    def calculate_monthly_value(df_rofo, month_cols, df_product):
-        """Hitung value (revenue projection) untuk setiap bulan"""
-        if df_rofo.empty or not month_cols:
-            return pd.DataFrame()
+            df_gen_forecast['Stock_Qty'] = 0
+
+        # ================ 3. SIMULATION RESULTS & METRICS ================
         
-        # Gabungkan dengan harga
-        df_with_price = add_product_info_to_data(df_rofo, df_product)
+        # Calculate totals
+        total_forecast_qty = 0
+        total_forecast_val = 0
         
-        # Hitung value untuk setiap bulan
-        monthly_values = []
-        for month in month_cols:
-            if 'Floor_Price' in df_with_price.columns:
-                # Hitung value = qty × floor price
-                month_value = (df_with_price[month] * df_with_price['Floor_Price'].fillna(0)).sum()
-            else:
-                month_value = 0
-            
-            monthly_values.append({
-                'Month': month,
-                'Qty': df_with_price[month].sum(),
-                'Value': month_value
-            })
+        # Calculate Value based on Price
+        month_cols_gen = [c for c in df_gen_forecast.columns if isinstance(c, datetime)]
         
-        return pd.DataFrame(monthly_values)
-    
-    # ================ MAIN DASHBOARD ================
-    if rofo_onwards_month_cols:
-        # ================ SECTION 1: CONNECTED TREND CHART ================
+        for m in month_cols_gen:
+            total_forecast_qty += df_gen_forecast[m].sum()
+            if 'Floor_Price' in df_gen_forecast.columns:
+                total_forecast_val += (df_gen_forecast[m] * df_gen_forecast['Floor_Price'].fillna(0)).sum()
+        
+        # Metrics Display
         st.divider()
-        st.subheader("📈 Connected Trend: Sales History vs Rofo Forecast")
+        m1, m2, m3, m4 = st.columns(4)
         
-        # Container untuk filter
-        filter_col1, filter_col2, filter_col3 = st.columns(3)
-        
-        with filter_col1:
-            # Brand filter
-            all_brands = df_rofo_onwards['Brand'].unique().tolist() if 'Brand' in df_rofo_onwards.columns else []
-            selected_brands = st.multiselect(
-                "Filter by Brand",
-                options=all_brands,
-                default=all_brands[:min(5, len(all_brands))] if all_brands else [],
-                help="Select brands to analyze"
-            )
-        
-        with filter_col2:
-            # Tier filter
-            all_tiers = df_rofo_onwards['SKU_Tier'].unique().tolist() if 'SKU_Tier' in df_rofo_onwards.columns else []
-            selected_tiers = st.multiselect(
-                "Filter by Tier",
-                options=all_tiers,
-                default=all_tiers,
-                help="Select SKU tiers to analyze"
-            )
-        
-        with filter_col3:
-            # Time period
-            time_period = st.selectbox(
-                "Time Period",
-                options=["Last 6 Months", "Last 12 Months", "All Available"],
-                index=1
-            )
-        
-        # Filter Rofo data
-        rofo_filtered = df_rofo_onwards.copy()
-        
-        if selected_brands and 'Brand' in rofo_filtered.columns:
-            rofo_filtered = rofo_filtered[rofo_filtered['Brand'].isin(selected_brands)]
-        
-        if selected_tiers and 'SKU_Tier' in rofo_filtered.columns:
-            rofo_filtered = rofo_filtered[rofo_filtered['SKU_Tier'].isin(selected_tiers)]
-        
-        # Hitung monthly totals untuk Rofo
-        monthly_rofo_totals = rofo_filtered[rofo_onwards_month_cols].sum()
-        monthly_rofo_df = pd.DataFrame({
-            'Month': monthly_rofo_totals.index,
-            'Rofo_Qty': monthly_rofo_totals.values
-        })
-        
-        # Hitung monthly value untuk Rofo
-        monthly_value_df = calculate_monthly_value(rofo_filtered, rofo_onwards_month_cols, df_product)
-        if not monthly_value_df.empty:
-            monthly_rofo_df = pd.merge(monthly_rofo_df, monthly_value_df[['Month', 'Value']], on='Month', how='left')
-        
-        # Parse bulan untuk sorting
-        monthly_rofo_df['Month_Date'] = monthly_rofo_df['Month'].apply(parse_rofo_month)
-        monthly_rofo_df = monthly_rofo_df.sort_values('Month_Date')
-        monthly_rofo_df['Month_Display'] = monthly_rofo_df['Month']
-        
-        # Filter berdasarkan time period
-        if time_period == "Last 6 Months" and len(monthly_rofo_df) > 6:
-            monthly_rofo_df = monthly_rofo_df.tail(6)
-        elif time_period == "Last 12 Months" and len(monthly_rofo_df) > 12:
-            monthly_rofo_df = monthly_rofo_df.tail(12)
-        
-        # Prepare Sales History data
-        monthly_sales_df = pd.DataFrame()
-        if not df_sales.empty:
-            # Filter sales data
-            sales_filtered = df_sales.copy()
+        with m1:
+            st.metric("Generated Forecast Qty", f"{total_forecast_qty:,.0f}")
+        with m2:
+            st.metric("Projected Revenue Value", f"${total_forecast_val:,.0f}")
+        with m3:
+            st.metric("Growth Scenario", f"{growth_scenario:+.0f}%")
+        with m4:
+            st.metric("Horizon", f"{forecast_horizon} Months")
             
-            if selected_brands and 'Brand' in sales_filtered.columns:
-                sales_filtered = sales_filtered[sales_filtered['Brand'].isin(selected_brands)]
-            
-            # Aggregate sales by month
-            monthly_sales = sales_filtered.groupby('Month').agg({
-                'Sales_Qty': 'sum'
-            }).reset_index()
-            
-            if not monthly_sales.empty:
-                monthly_sales = monthly_sales.sort_values('Month')
-                monthly_sales['Month_Display'] = monthly_sales['Month'].apply(lambda x: x.strftime('%b-%y'))
-                monthly_sales_df = monthly_sales
+        # ================ 4. INTERACTIVE VISUALIZATION (PAST + FUTURE) ================
         
-        # Buat dua chart terpisah untuk menghindari error
-        chart_col1, chart_col2 = st.columns(2)
+        st.subheader("📈 Trend Simulation: History vs Generated Forecast")
         
-        with chart_col1:
-            # Chart 1: Rofo Quantity
-            fig_qty = go.Figure()
-            
-            # Add Rofo Forecast (Quantity)
-            fig_qty.add_trace(go.Bar(
-                x=monthly_rofo_df['Month_Display'],
-                y=monthly_rofo_df['Rofo_Qty'],
-                name='Rofo Forecast (Qty)',
-                marker_color='#667eea',
-                hovertemplate='<b>%{x}</b><br>Forecast: %{y:,.0f} units<extra></extra>'
+        # Prepare data for chart (Aggregate All SKUs)
+        # History
+        hist_agg = df_sales_hist.groupby('Month')['Sales_Qty'].sum().reset_index()
+        hist_agg['Type'] = 'History'
+        
+        # Future
+        future_data = []
+        for m in month_cols_gen:
+            qty = df_gen_forecast[m].sum()
+            future_data.append({'Month': m, 'Sales_Qty': qty, 'Type': 'Forecast'})
+        
+        future_agg = pd.DataFrame(future_data)
+        
+        # Combine
+        combined_trend = pd.concat([hist_agg, future_agg])
+        
+        # Plot
+        fig_sim = go.Figure()
+        
+        # History Line
+        fig_sim.add_trace(go.Scatter(
+            x=hist_agg['Month'], y=hist_agg['Sales_Qty'],
+            mode='lines+markers', name='Historical Sales',
+            line=dict(color='#9E9E9E', width=3)
+        ))
+        
+        # Forecast Line
+        fig_sim.add_trace(go.Scatter(
+            x=future_agg['Month'], y=future_agg['Sales_Qty'],
+            mode='lines+markers', name='Generated Forecast',
+            line=dict(color='#667eea', width=4, dash='dot')
+        ))
+        
+        # Connect the lines
+        if not hist_agg.empty and not future_agg.empty:
+            connect_x = [hist_agg['Month'].iloc[-1], future_agg['Month'].iloc[0]]
+            connect_y = [hist_agg['Sales_Qty'].iloc[-1], future_agg['Sales_Qty'].iloc[0]]
+            fig_sim.add_trace(go.Scatter(
+                x=connect_x, y=connect_y,
+                mode='lines', showlegend=False,
+                line=dict(color='#667eea', width=2, dash='dot')
             ))
             
-            # Add Sales History jika ada
-            if not monthly_sales_df.empty:
-                fig_qty.add_trace(go.Scatter(
-                    x=monthly_sales_df['Month_Display'],
-                    y=monthly_sales_df['Sales_Qty'],
-                    name='Historical Sales',
-                    mode='lines+markers',
-                    line=dict(color='#4CAF50', width=3, dash='dash'),
-                    marker=dict(size=6, color='#4CAF50'),
-                    hovertemplate='<b>%{x}</b><br>Sales: %{y:,.0f} units<extra></extra>'
-                ))
-            
-            fig_qty.update_layout(
-                height=400,
-                title='Quantity: Sales History vs Rofo Forecast',
-                xaxis_title='Month',
-                yaxis_title='Quantity (units)',
-                hovermode='x unified',
-                plot_bgcolor='white',
-                showlegend=True
-            )
-            
-            st.plotly_chart(fig_qty, use_container_width=True)
-            
-            # Qty metrics
-            col_qty1, col_qty2 = st.columns(2)
-            with col_qty1:
-                total_rofo_qty = monthly_rofo_df['Rofo_Qty'].sum()
-                st.metric("Total Rofo Qty", f"{format_number(total_rofo_qty)}")
-            with col_qty2:
-                avg_monthly_qty = monthly_rofo_df['Rofo_Qty'].mean()
-                st.metric("Avg Monthly Qty", f"{format_number(avg_monthly_qty)}")
-
-        with chart_col2:
-            if 'Value' in monthly_rofo_df.columns and monthly_rofo_df['Value'].sum() > 0:
-                # Chart 2: Rofo Value
-                fig_value = go.Figure()
-                
-                fig_value.add_trace(go.Scatter(
-                    x=monthly_rofo_df['Month_Display'],
-                    y=monthly_rofo_df['Value'],
-                    name='Rofo Value ($)',
-                    mode='lines+markers',
-                    line=dict(color='#FF9800', width=3),
-                    marker=dict(size=8, color='#FF9800'),
-                    hovertemplate='<b>%{x}</b><br>Value: $%{y:,.0f}<extra></extra>'
-                ))
-                
-                fig_value.update_layout(
-                    height=400,
-                    title='Rofo Forecast Value (Projection)',
-                    xaxis_title='Month',
-                    yaxis_title='Value ($)',
-                    hovermode='x unified',
-                    plot_bgcolor='white'
-                )
-                
-                st.plotly_chart(fig_value, use_container_width=True)
-                
-                # Value metrics
-                col_val1, col_val2 = st.columns(2)
-                with col_val1:
-                    total_rofo_value = monthly_rofo_df['Value'].sum()
-                    st.metric("Total Rofo Value", f"${format_number(total_rofo_value)}")
-                with col_val2:
-                    avg_monthly_value = monthly_rofo_df['Value'].mean()
-                    st.metric("Avg Monthly Value", f"${format_number(avg_monthly_value)}")
-            else:
-                st.info("No value data available. Check if Floor_Price exists in Product Master.")
-                if not df_product.empty:
-                    st.write(f"Product Master columns: {df_product.columns.tolist()}")
+        fig_sim.update_layout(
+            title=f"Projection: {forecast_method} ({growth_scenario:+.0f}%)",
+            xaxis_title="Month", yaxis_title="Quantity",
+            height=400, hovermode="x unified"
+        )
+        st.plotly_chart(fig_sim, use_container_width=True)
         
-        # Tampilkan data summary
-        st.markdown("#### 📊 Monthly Summary")
-        display_summary = monthly_rofo_df.copy()
-        display_summary['Rofo_Qty'] = display_summary['Rofo_Qty'].apply(format_number)
-        if 'Value' in display_summary.columns:
-            display_summary['Value'] = display_summary['Value'].apply(lambda x: f"${format_number(x)}")
+        # ================ 5. REPLENISHMENT SUGGESTION TABLE ================
+        st.subheader("📝 Replenishment Plan (Suggested PO)")
         
+        # Hitung Total Demand selama Horizon
+        df_gen_forecast['Total_Demand'] = df_gen_forecast[month_cols_gen].sum(axis=1)
+        
+        # Hitung Weekly Demand Rata-rata (untuk Safety Stock)
+        df_gen_forecast['Avg_Weekly_Demand'] = df_gen_forecast['Total_Demand'] / (4.3 * forecast_horizon)
+        
+        # Hitung Safety Stock Qty
+        df_gen_forecast['Safety_Stock_Qty'] = df_gen_forecast['Avg_Weekly_Demand'] * safety_stock_weeks
+        
+        # Hitung Suggested PO
+        # Logic: PO = Demand + Safety Stock - Current Stock
+        df_gen_forecast['Suggested_PO'] = (
+            df_gen_forecast['Total_Demand'] + 
+            df_gen_forecast['Safety_Stock_Qty'] - 
+            df_gen_forecast['Stock_Qty']
+        )
+        # Jika hasil negatif (stock cukup), set 0
+        df_gen_forecast['Suggested_PO'] = df_gen_forecast['Suggested_PO'].apply(lambda x: max(0, round(x)))
+        
+        # Hitung Est PO Value
+        if 'Net_Order_Price' in df_gen_forecast.columns:
+            df_gen_forecast['Est_PO_Cost'] = df_gen_forecast['Suggested_PO'] * df_gen_forecast['Net_Order_Price'].fillna(0)
+        else:
+            df_gen_forecast['Est_PO_Cost'] = 0
+            
+        # Rename month columns for display
+        rename_map = {m: m.strftime('%b-%y') for m in month_cols_gen}
+        display_cols = ['SKU_ID', 'Product_Name', 'Brand', 'Stock_Qty', 'Total_Demand', 'Safety_Stock_Qty', 'Suggested_PO', 'Est_PO_Cost'] + list(rename_map.values())
+        
+        df_display_gen = df_gen_forecast.rename(columns=rename_map)
+        
+        # Urutkan berdasarkan Suggested PO tertinggi
+        df_display_gen = df_display_gen.sort_values('Suggested_PO', ascending=False)
+        
+        # Filter kolom yang ada
+        valid_cols = [c for c in display_cols if c in df_display_gen.columns]
+        
+        # Tampilkan DataFrame
         st.dataframe(
-            display_summary[['Month_Display', 'Rofo_Qty', 'Value'] if 'Value' in display_summary.columns else ['Month_Display', 'Rofo_Qty']],
+            df_display_gen[valid_cols],
+            column_config={
+                "Stock_Qty": st.column_config.NumberColumn("Current Stock", format="%d"),
+                "Total_Demand": st.column_config.NumberColumn(f"Demand ({forecast_horizon} Mo)", format="%d"),
+                "Safety_Stock_Qty": st.column_config.NumberColumn("Safety Stock", format="%d"),
+                "Suggested_PO": st.column_config.NumberColumn("Suggested PO", format="%d"),
+                "Est_PO_Cost": st.column_config.NumberColumn("Est PO Cost", format="$ %d")
+            },
             use_container_width=True,
-            height=200
+            height=500
         )
         
-        # ================ SECTION 2: BRAND ANALYSIS ================
-        st.divider()
-        st.subheader("🏷️ Brand Analysis: Qty & Value Distribution")
-        
-        if 'Brand' in rofo_filtered.columns and not rofo_filtered.empty:
-            # Hitung totals per brand
-            brand_totals = []
-            
-            for brand in rofo_filtered['Brand'].unique():
-                brand_data = rofo_filtered[rofo_filtered['Brand'] == brand]
-                brand_qty = brand_data[rofo_onwards_month_cols].sum().sum()
-                
-                # Hitung value untuk brand ini
-                brand_with_price = add_product_info_to_data(brand_data, df_product)
-                brand_value = 0
-                if 'Floor_Price' in brand_with_price.columns:
-                    for month in rofo_onwards_month_cols:
-                        brand_value += (brand_with_price[month] * brand_with_price['Floor_Price'].fillna(0)).sum()
-                
-                brand_totals.append({
-                    'Brand': brand,
-                    'Total_Qty': brand_qty,
-                    'Total_Value': brand_value,
-                    'SKU_Count': len(brand_data)
-                })
-            
-            brand_df = pd.DataFrame(brand_totals)
-            brand_df = brand_df.sort_values('Total_Value', ascending=False)
-            
-            # Tampilkan dalam 2 chart side-by-side
-            chart_col1, chart_col2 = st.columns(2)
-            
-            with chart_col1:
-                # Bar chart untuk Qty
-                fig_brand_qty = go.Figure()
-                fig_brand_qty.add_trace(go.Bar(
-                    x=brand_df['Brand'].head(10),
-                    y=brand_df['Total_Qty'].head(10),
-                    name='Quantity',
-                    marker_color='#667eea',
-                    text=brand_df['Total_Qty'].head(10).apply(format_number),
-                    textposition='auto'
-                ))
-                
-                fig_brand_qty.update_layout(
-                    height=400,
-                    title='Top 10 Brands by Quantity',
-                    xaxis_title='Brand',
-                    yaxis_title='Total Quantity',
-                    plot_bgcolor='white'
-                )
-                st.plotly_chart(fig_brand_qty, use_container_width=True)
-            
-            with chart_col2:
-                # Bar chart untuk Value
-                fig_brand_value = go.Figure()
-                fig_brand_value.add_trace(go.Bar(
-                    x=brand_df['Brand'].head(10),
-                    y=brand_df['Total_Value'].head(10),
-                    name='Value ($)',
-                    marker_color='#FF9800',
-                    text=brand_df['Total_Value'].head(10).apply(lambda x: f"${format_number(x)}"),
-                    textposition='auto'
-                ))
-                
-                fig_brand_value.update_layout(
-                    height=400,
-                    title='Top 10 Brands by Value',
-                    xaxis_title='Brand',
-                    yaxis_title='Total Value ($)',
-                    plot_bgcolor='white'
-                )
-                st.plotly_chart(fig_brand_value, use_container_width=True)
-            
-            # Tampilkan data tabel dengan format angka
-            st.markdown("#### 📊 Brand Performance Details")
-            display_brand_df = brand_df.copy()
-            display_brand_df['Total_Qty'] = display_brand_df['Total_Qty'].apply(format_number)
-            display_brand_df['Total_Value'] = display_brand_df['Total_Value'].apply(lambda x: f"${format_number(x)}")
-            
-            # Hitung average value per SKU
-            def calculate_avg_value(row):
-                try:
-                    value_str = str(row['Total_Value']).replace('$', '').replace(',', '')
-                    value_num = float(value_str) if value_str.replace('.', '').isdigit() else 0
-                    sku_count = row['SKU_Count']
-                    if sku_count > 0 and value_num > 0:
-                        return f"${format_number(value_num / sku_count)}"
-                    else:
-                        return "$0"
-                except:
-                    return "$0"
-            
-            display_brand_df['Avg_Value_per_SKU'] = display_brand_df.apply(calculate_avg_value, axis=1)
-            
-            st.dataframe(
-                display_brand_df[['Brand', 'SKU_Count', 'Total_Qty', 'Total_Value', 'Avg_Value_per_SKU']],
-                use_container_width=True,
-                height=300
-            )
-        
-        # ================ SECTION 3: QUARTERLY GROWTH ANALYSIS ================
-        st.divider()
-        st.subheader("📊 Quarterly Growth Analysis")
-        
-        # Group data by quarter
-        if len(monthly_rofo_df) >= 3:
-            monthly_rofo_df['Quarter'] = monthly_rofo_df['Month_Date'].apply(calculate_quarter)
-            
-            quarterly_data = monthly_rofo_df.groupby('Quarter').agg({
-                'Rofo_Qty': 'sum',
-                'Value': 'sum' if 'Value' in monthly_rofo_df.columns else None
-            }).reset_index()
-            
-            # Hitung growth
-            quarterly_data = quarterly_data.sort_values('Quarter')
-            quarterly_data['Qty_Growth'] = quarterly_data['Rofo_Qty'].pct_change() * 100
-            if 'Value' in quarterly_data.columns:
-                quarterly_data['Value_Growth'] = quarterly_data['Value'].pct_change() * 100
-            
-            # Tampilkan quarterly charts
-            q_col1, q_col2 = st.columns(2)
-            
-            with q_col1:
-                # Quarterly Quantity
-                fig_q_qty = go.Figure()
-                fig_q_qty.add_trace(go.Bar(
-                    x=quarterly_data['Quarter'],
-                    y=quarterly_data['Rofo_Qty'],
-                    name='Quantity',
-                    marker_color='#667eea',
-                    text=quarterly_data['Rofo_Qty'].apply(format_number),
-                    textposition='auto'
-                ))
-                
-                # Add growth as line
-                fig_q_qty.add_trace(go.Scatter(
-                    x=quarterly_data['Quarter'],
-                    y=quarterly_data['Qty_Growth'],
-                    name='Qty Growth %',
-                    mode='lines+markers',
-                    yaxis='y2',
-                    line=dict(color='#4CAF50', width=3),
-                    marker=dict(size=8, color='#4CAF50'),
-                    hovertemplate='<b>%{x}</b><br>Growth: %{y:.0f}%<extra></extra>'
-                ))
-                
-                fig_q_qty.update_layout(
-                    height=400,
-                    title='Quarterly Quantity & Growth',
-                    xaxis_title='Quarter',
-                    yaxis=dict(title='Quantity'),
-                    yaxis2=dict(
-                        title='Growth %',
-                        overlaying='y',
-                        side='right'
-                    ),
-                    plot_bgcolor='white'
-                )
-                st.plotly_chart(fig_q_qty, use_container_width=True)
-            
-            with q_col2:
-                if 'Value' in quarterly_data.columns:
-                    # Quarterly Value
-                    fig_q_value = go.Figure()
-                    fig_q_value.add_trace(go.Bar(
-                        x=quarterly_data['Quarter'],
-                        y=quarterly_data['Value'],
-                        name='Value ($)',
-                        marker_color='#FF9800',
-                        text=quarterly_data['Value'].apply(lambda x: f"${format_number(x)}"),
-                        textposition='auto'
-                    ))
-                    
-                    # Add growth as line
-                    fig_q_value.add_trace(go.Scatter(
-                        x=quarterly_data['Quarter'],
-                        y=quarterly_data['Value_Growth'],
-                        name='Value Growth %',
-                        mode='lines+markers',
-                        yaxis='y2',
-                        line=dict(color='#9C27B0', width=3),
-                        marker=dict(size=8, color='#9C27B0'),
-                        hovertemplate='<b>%{x}</b><br>Growth: %{y:.0f}%<extra></extra>'
-                    ))
-                    
-                    fig_q_value.update_layout(
-                        height=400,
-                        title='Quarterly Value & Growth',
-                        xaxis_title='Quarter',
-                        yaxis=dict(title='Value ($)'),
-                        yaxis2=dict(
-                            title='Growth %',
-                            overlaying='y',
-                            side='right'
-                        ),
-                        plot_bgcolor='white'
-                    )
-                    st.plotly_chart(fig_q_value, use_container_width=True)
-            
-            # Quarterly summary table
-            st.markdown("#### 📋 Quarterly Summary")
-            display_q_df = quarterly_data.copy()
-            display_q_df['Rofo_Qty'] = display_q_df['Rofo_Qty'].apply(format_number)
-            if 'Value' in display_q_df.columns:
-                display_q_df['Value'] = display_q_df['Value'].apply(lambda x: f"${format_number(x)}")
-            display_q_df['Qty_Growth'] = display_q_df['Qty_Growth'].apply(lambda x: f"{x:+.0f}%" if pd.notnull(x) else "N/A")
-            if 'Value_Growth' in display_q_df.columns:
-                display_q_df['Value_Growth'] = display_q_df['Value_Growth'].apply(lambda x: f"{x:+.0f}%" if pd.notnull(x) else "N/A")
-            
-            st.dataframe(
-                display_q_df,
-                use_container_width=True,
-                height=200
-            )
-        
-        # ================ SECTION 4: ROFO DATA EXPLORER ================
-        st.divider()
-        st.subheader("📋 Rofo Data Explorer")
-        
-        # Filter controls untuk tabel
-        exp_col1, exp_col2, exp_col3 = st.columns(3)
-        
-        with exp_col1:
-            table_brand_filter = st.multiselect(
-                "Filter Table by Brand",
-                options=all_brands,
-                default=[],
-                key="table_brand_filter"
-            )
-        
-        with exp_col2:
-            show_columns = st.multiselect(
-                "Select Columns to Display",
-                options=['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier'] + rofo_onwards_month_cols[:6],
-                default=['SKU_ID', 'Product_Name', 'Brand'] + rofo_onwards_month_cols[:3]
-            )
-        
-        with exp_col3:
-            rows_to_show = st.slider("Rows to Show", 10, 100, 20)
-        
-        # Apply filters
-        display_data = df_rofo_onwards.copy()
-        
-        if table_brand_filter and 'Brand' in display_data.columns:
-            display_data = display_data[display_data['Brand'].isin(table_brand_filter)]
-        
-        if show_columns:
-            available_cols = [col for col in show_columns if col in display_data.columns]
-            display_data = display_data[available_cols]
-        
-        # Format angka di tabel
-        for col in display_data.columns:
-            if col in rofo_onwards_month_cols:
-                display_data[col] = display_data[col].apply(format_number)
-        
-        # Tampilkan tabel
-        st.dataframe(
-            display_data.head(rows_to_show),
-            use_container_width=True,
-            height=400
-        )
-        
-        # Download button
-        csv = display_data.to_csv(index=False)
+        # Download Button
+        csv_gen = df_display_gen.to_csv(index=False)
         st.download_button(
-            label="📥 Download Filtered Rofo Data",
-            data=csv,
-            file_name=f"rofo_data_{datetime.now().strftime('%Y%m%d')}.csv",
+            label="📥 Download Forecast & PO Plan",
+            data=csv_gen,
+            file_name=f"Generated_Forecast_Plan_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv",
             use_container_width=True
         )
         
-        # ================ SECTION 5: KEY INSIGHTS ================
-        st.divider()
-        st.subheader("💡 Key Insights & Recommendations")
-        
-        # Hitung insights
-        insights = []
-        
-        # Insight 1: Top performing brand
-        if 'brand_df' in locals() and not brand_df.empty:
-            top_brand = brand_df.iloc[0]
-            insights.append(f"**🏆 Top Performer:** {top_brand['Brand']} contributes {format_number(top_brand['Total_Qty'])} units (${format_number(top_brand['Total_Value'])})")
-        
-        # Insight 2: Quarter growth
-        if 'quarterly_data' in locals() and len(quarterly_data) >= 2:
-            latest_qty_growth = quarterly_data['Qty_Growth'].iloc[-1]
-            if not pd.isna(latest_qty_growth):
-                if latest_qty_growth > 20:
-                    insights.append(f"**📈 Strong Growth:** Latest quarter shows {latest_qty_growth:+.0f}% quantity growth")
-                elif latest_qty_growth < -10:
-                    insights.append(f"**⚠️ Decline Alert:** Latest quarter shows {latest_qty_growth:+.0f}% quantity decline")
-        
-        # Insight 3: Value concentration
-        if 'brand_df' in locals() and len(brand_df) >= 3:
-            top_3_value = brand_df.head(3)['Total_Value'].sum()
-            total_value = brand_df['Total_Value'].sum()
-            if total_value > 0:
-                concentration = (top_3_value / total_value) * 100
-                if concentration > 70:
-                    insights.append(f"**🎯 High Concentration:** Top 3 brands contribute {concentration:.0f}% of total value")
-        
-        # Tampilkan insights
-        if insights:
-            for insight in insights:
-                st.info(insight)
-        else:
-            st.success("✅ Forecast appears well-balanced across brands and quarters")
-        
-        # Recommendations
-        st.markdown("#### 🚀 Recommended Actions")
-        
-        rec_col1, rec_col2 = st.columns(2)
-        
-        with rec_col1:
-            st.markdown("""
-            **📈 Growth Focus:**
-            1. **Leverage top brands** - allocate marketing budget to highest performers
-            2. **Address declining quarters** - review QoQ performance gaps
-            3. **Optimize inventory** for peak forecast months
-            4. **Cross-sell opportunities** between related high-value SKUs
-            """)
-        
-        with rec_col2:
-            st.markdown("""
-            **💰 Value Optimization:**
-            1. **Review low-value SKUs** - consider rationalization
-            2. **Price optimization** for high-volume items
-            3. **Bundle strategies** for complementary products
-            4. **Focus on margin** - not just volume
-            """)
-    
     else:
-        st.error("❌ No Rofo data available for analysis")
+        st.warning("⚠️ No Sales Data available to generate forecast.")
 
 # --- TAB 8: PROFITABILITY ANALYSIS ---
 with tab8:
