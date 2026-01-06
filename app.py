@@ -4069,109 +4069,106 @@ with tab7:
                 monthly_sales['Month_Display'] = monthly_sales['Month'].apply(lambda x: x.strftime('%b-%y'))
                 monthly_sales_df = monthly_sales
         
-        # Buat connected chart
-        fig_connected = go.Figure()
+        # Buat dua chart terpisah untuk menghindari error
+        chart_col1, chart_col2 = st.columns(2)
         
-        # Add Rofo Forecast (Quantity) - Bar chart
-        fig_connected.add_trace(go.Bar(
-            x=monthly_rofo_df['Month_Display'],
-            y=monthly_rofo_df['Rofo_Qty'],
-            name='Rofo Forecast (Qty)',
-            marker_color='#667eea',
-            hovertemplate='<b>%{x}</b><br>Forecast: %{y:,.0f} units<extra></extra>',
-            yaxis='y'
-        ))
-        
-        # Add Rofo Value (Revenue Projection) - Line chart
-        if 'Value' in monthly_rofo_df.columns and monthly_rofo_df['Value'].sum() > 0:
-            fig_connected.add_trace(go.Scatter(
+        with chart_col1:
+            # Chart 1: Rofo Quantity
+            fig_qty = go.Figure()
+            
+            # Add Rofo Forecast (Quantity)
+            fig_qty.add_trace(go.Bar(
                 x=monthly_rofo_df['Month_Display'],
-                y=monthly_rofo_df['Value'],
-                name='Rofo Value ($)',
-                mode='lines+markers',
-                line=dict(color='#FF9800', width=3),
-                marker=dict(size=8, color='#FF9800'),
-                hovertemplate='<b>%{x}</b><br>Value: $%{y:,.0f}<extra></extra>',
-                yaxis='y2'
+                y=monthly_rofo_df['Rofo_Qty'],
+                name='Rofo Forecast (Qty)',
+                marker_color='#667eea',
+                hovertemplate='<b>%{x}</b><br>Forecast: %{y:,.0f} units<extra></extra>'
             ))
-        
-        # Add Sales History (Quantity) - Line chart
-        if not monthly_sales_df.empty:
-            # Cari bulan yang overlap dengan Rofo
-            sales_months = monthly_sales_df['Month_Display'].tolist()
-            rofo_months = monthly_rofo_df['Month_Display'].tolist()
             
-            # Filter sales untuk bulan-bulan sebelum forecast dimulai
-            overlap_index = -1
-            for i, sales_month in enumerate(sales_months):
-                if sales_month in rofo_months:
-                    overlap_index = i
-                    break
-            
-            if overlap_index > 0:
-                historical_sales = monthly_sales_df.iloc[:overlap_index]
-                fig_connected.add_trace(go.Scatter(
-                    x=historical_sales['Month_Display'],
-                    y=historical_sales['Sales_Qty'],
+            # Add Sales History jika ada
+            if not monthly_sales_df.empty:
+                fig_qty.add_trace(go.Scatter(
+                    x=monthly_sales_df['Month_Display'],
+                    y=monthly_sales_df['Sales_Qty'],
                     name='Historical Sales',
                     mode='lines+markers',
                     line=dict(color='#4CAF50', width=3, dash='dash'),
                     marker=dict(size=6, color='#4CAF50'),
-                    hovertemplate='<b>%{x}</b><br>Sales: %{y:,.0f} units<extra></extra>',
-                    yaxis='y'
+                    hovertemplate='<b>%{x}</b><br>Sales: %{y:,.0f} units<extra></extra>'
                 ))
-        
-        # Update layout dengan dual y-axis
-        fig_connected.update_layout(
-            height=500,
-            title=f'Connected Trend: Sales History → Rofo Forecast ({len(selected_brands)} brands)',
-            xaxis_title='Month',
-            yaxis=dict(
-                title='Quantity (units)',
-                titlefont=dict(color='#667eea'),
-                tickfont=dict(color='#667eea')
-            ),
-            yaxis2=dict(
-                title='Value ($)',
-                titlefont=dict(color='#FF9800'),
-                tickfont=dict(color='#FF9800'),
-                overlaying='y',
-                side='right',
-                tickprefix='$'
-            ),
-            hovermode='x unified',
-            plot_bgcolor='white',
-            barmode='group',
-            showlegend=True,
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
+            
+            fig_qty.update_layout(
+                height=400,
+                title='Quantity: Sales History vs Rofo Forecast',
+                xaxis_title='Month',
+                yaxis_title='Quantity (units)',
+                hovermode='x unified',
+                plot_bgcolor='white',
+                showlegend=True
             )
+            
+            st.plotly_chart(fig_qty, use_container_width=True)
+            
+            # Qty metrics
+            col_qty1, col_qty2 = st.columns(2)
+            with col_qty1:
+                total_rofo_qty = monthly_rofo_df['Rofo_Qty'].sum()
+                st.metric("Total Rofo Qty", f"{format_number(total_rofo_qty)}")
+            with col_qty2:
+                avg_monthly_qty = monthly_rofo_df['Rofo_Qty'].mean()
+                st.metric("Avg Monthly Qty", f"{format_number(avg_monthly_qty)}")
+
+        with chart_col2:
+            if 'Value' in monthly_rofo_df.columns and monthly_rofo_df['Value'].sum() > 0:
+                # Chart 2: Rofo Value
+                fig_value = go.Figure()
+                
+                fig_value.add_trace(go.Scatter(
+                    x=monthly_rofo_df['Month_Display'],
+                    y=monthly_rofo_df['Value'],
+                    name='Rofo Value ($)',
+                    mode='lines+markers',
+                    line=dict(color='#FF9800', width=3),
+                    marker=dict(size=8, color='#FF9800'),
+                    hovertemplate='<b>%{x}</b><br>Value: $%{y:,.0f}<extra></extra>'
+                ))
+                
+                fig_value.update_layout(
+                    height=400,
+                    title='Rofo Forecast Value (Projection)',
+                    xaxis_title='Month',
+                    yaxis_title='Value ($)',
+                    hovermode='x unified',
+                    plot_bgcolor='white'
+                )
+                
+                st.plotly_chart(fig_value, use_container_width=True)
+                
+                # Value metrics
+                col_val1, col_val2 = st.columns(2)
+                with col_val1:
+                    total_rofo_value = monthly_rofo_df['Value'].sum()
+                    st.metric("Total Rofo Value", f"${format_number(total_rofo_value)}")
+                with col_val2:
+                    avg_monthly_value = monthly_rofo_df['Value'].mean()
+                    st.metric("Avg Monthly Value", f"${format_number(avg_monthly_value)}")
+            else:
+                st.info("No value data available. Check if Floor_Price exists in Product Master.")
+                if not df_product.empty:
+                    st.write(f"Product Master columns: {df_product.columns.tolist()}")
+        
+        # Tampilkan data summary
+        st.markdown("#### 📊 Monthly Summary")
+        display_summary = monthly_rofo_df.copy()
+        display_summary['Rofo_Qty'] = display_summary['Rofo_Qty'].apply(format_number)
+        if 'Value' in display_summary.columns:
+            display_summary['Value'] = display_summary['Value'].apply(lambda x: f"${format_number(x)}")
+        
+        st.dataframe(
+            display_summary[['Month_Display', 'Rofo_Qty', 'Value'] if 'Value' in display_summary.columns else ['Month_Display', 'Rofo_Qty']],
+            use_container_width=True,
+            height=200
         )
-        
-        st.plotly_chart(fig_connected, use_container_width=True)
-        
-        # Summary metrics
-        col_sum1, col_sum2, col_sum3, col_sum4 = st.columns(4)
-        
-        with col_sum1:
-            total_rofo_qty = monthly_rofo_df['Rofo_Qty'].sum()
-            st.metric("Total Rofo Qty", f"{format_number(total_rofo_qty)}")
-        
-        with col_sum2:
-            total_rofo_value = monthly_rofo_df['Value'].sum() if 'Value' in monthly_rofo_df.columns else 0
-            st.metric("Total Rofo Value", f"${format_number(total_rofo_value)}")
-        
-        with col_sum3:
-            avg_monthly_qty = monthly_rofo_df['Rofo_Qty'].mean()
-            st.metric("Avg Monthly Qty", f"{format_number(avg_monthly_qty)}")
-        
-        with col_sum4:
-            avg_monthly_value = monthly_rofo_df['Value'].mean() if 'Value' in monthly_rofo_df.columns else 0
-            st.metric("Avg Monthly Value", f"${format_number(avg_monthly_value)}")
         
         # ================ SECTION 2: BRAND ANALYSIS ================
         st.divider()
@@ -4256,8 +4253,13 @@ with tab7:
             # Hitung average value per SKU
             def calculate_avg_value(row):
                 try:
-                    value_num = float(str(row['Total_Value']).replace('$', '').replace(',', ''))
-                    return f"${format_number(value_num / row['SKU_Count'])}"
+                    value_str = str(row['Total_Value']).replace('$', '').replace(',', '')
+                    value_num = float(value_str) if value_str.replace('.', '').isdigit() else 0
+                    sku_count = row['SKU_Count']
+                    if sku_count > 0 and value_num > 0:
+                        return f"${format_number(value_num / sku_count)}"
+                    else:
+                        return "$0"
                 except:
                     return "$0"
             
