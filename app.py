@@ -5029,28 +5029,45 @@ with tab9:
         # ================ SECTION 6: INSIGHTS ================
         st.divider()
         st.subheader("💡 Channel Insights")
-        
+
         insights = []
-        
+
         # Insight 1: Total comparison
         insights.append(f"**📊 Total Volume:** Historical: {format_number(total_historical_qty)} units → 2026 Forecast: {format_number(total_forecast_qty)} units")
-        
+
         # Insight 2: Growth rate
         if total_historical_qty > 0:
             overall_growth = ((total_forecast_qty - total_historical_qty) / total_historical_qty * 100)
             growth_color = "📈" if overall_growth > 0 else "📉"
             insights.append(f"**{growth_color} Overall Growth:** {overall_growth:+.1f}% from historical to 2026 forecast")
-        
-        # Insight 3: Top brand
+
+        # Insight 3: Top brand - FIXED
         if 'brand_df' in locals() and not brand_df.empty:
             top_brand = brand_df.iloc[0]
-            insights.append(f"**🏆 Top Brand:** {top_brand['Brand']} forecasts {format_number(top_brand['2026_Forecast'])} units in 2026")
-        
+    
+            # Get top brand forecast quantity
+            top_brand_forecast = top_brand['2026_Forecast']
+    
+            # Convert to float (handle string formatting)
+            try:
+                if isinstance(top_brand_forecast, str):
+                    # Remove commas and convert to float
+                    top_brand_qty = float(str(top_brand_forecast).replace(',', ''))
+                else:
+                    top_brand_qty = float(top_brand_forecast)
+            except:
+                top_brand_qty = 0
+    
+            # Calculate share
+            brand_share = (top_brand_qty / total_forecast_qty * 100) if total_forecast_qty > 0 else 0
+    
+            insights.append(f"**🏆 Top Brand:** {top_brand['Brand']} forecasts {format_number(top_brand['2026_Forecast'])} units ({brand_share:.1f}% of total forecast)")
+
         # Insight 4: Forecast coverage
         if reseller_forecast_cols:
             forecast_months = len(reseller_forecast_cols)
             insights.append(f"**📅 Forecast Period:** {forecast_months} months (Jan-Dec 2026)")
-        
+
         # Display insights
         for insight in insights:
             st.info(insight)
