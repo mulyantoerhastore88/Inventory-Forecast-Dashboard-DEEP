@@ -3875,53 +3875,74 @@ with tab6:
 # --- TAB 7: STRATEGIC FORECAST PLANNER (12-MONTH) ---
 with tab7:
     st.subheader("🔮 Strategic Forecast Planner (12-Month Horizon)")
-    st.markdown("Generate a comprehensive 12-month Rolling Forecast (Rofo) based on seasonality, historical trends, and strategic growth targets per brand.")
+    st.markdown("Generate a comprehensive 12-month Rolling Forecast (Rofo) based on seasonality, historical trends, and strategic growth targets.")
 
     # ================ 1. STRATEGIC CONTROLS ================
-    # Container untuk pengaturan skenario
-    with st.container():
-        st.markdown("### 🛠️ Scenario Configuration")
-        
-        col_conf1, col_conf2 = st.columns([1, 2])
-        
-        with col_conf1:
-            st.info("📊 **Global Settings**")
-            # Global Growth Base
+    
+    # --- A. Global & Anomaly Settings ---
+    col_conf1, col_conf2 = st.columns(2)
+    
+    with col_conf1:
+        with st.expander("🛠️ Global Configuration", expanded=True):
             global_growth = st.slider(
                 "Global Base Growth (%)", 
                 min_value=-20, max_value=50, value=10, step=5,
                 help="Base growth rate applied to all SKUs initially."
             )
             
-            # Forecast Logic
             forecast_logic = st.selectbox(
                 "Forecasting Logic",
                 options=["Seasonal (YoY Pattern)", "Flat Run-Rate (Last 3M Avg)"],
                 help="Seasonal: Mengikuti pola bulan yang sama tahun lalu. Flat: Menggunakan rata-rata 3 bulan terakhir."
             )
 
-        with col_conf2:
-            st.warning("🏷️ **Brand Specific Override (Optional)**")
-            st.markdown("Adjust growth targets for specific top brands manually.")
+    with col_conf2:
+        with st.expander("🔧 Anomaly Correction (Fix Bad History)", expanded=True):
+            st.caption("Use this to ignore bad data periods (e.g. failed strategy) from history.")
             
-            # Get Top 5 Brands for slider generation
-            if not df_sales.empty and 'Brand' in df_sales.columns:
-                top_brands = df_sales.groupby('Brand')['Sales_Qty'].sum().sort_values(ascending=False).head(4).index.tolist()
-                
-                # Buat 2 kolom untuk slider brand
-                b_col1, b_col2 = st.columns(2)
-                brand_adjustments = {}
-                
-                for i, brand in enumerate(top_brands):
-                    target_col = b_col1 if i % 2 == 0 else b_col2
-                    with target_col:
-                        brand_adjustments[brand] = st.slider(
-                            f"{brand} Growth", 
-                            min_value=-20, max_value=50, value=global_growth, 
-                            key=f"slider_{brand}"
-                        )
-            else:
-                brand_adjustments = {}
+            # Get list of brands
+            all_brands_list = df_sales['Brand'].unique().tolist() if not df_sales.empty and 'Brand' in df_sales.columns else []
+            
+            anomaly_brands = st.multiselect(
+                "Select Brands with Anomaly",
+                options=all_brands_list,
+                default=[],
+                help="Misal: Acneact"
+            )
+            
+            anomaly_months = st.multiselect(
+                "Select Anomaly Months",
+                options=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+                format_func=lambda x: date(2000, x, 1).strftime('%B'),
+                default=[],
+                help="Bulan ini baseline-nya akan diganti dengan rata-rata 3 bulan sebelumnya."
+            )
+
+    # --- B. Brand Specific Override (ALL BRANDS) ---
+    with st.expander("🏷️ Brand Specific Growth Override (Optional)", expanded=False):
+        st.info("Adjust growth targets for specific brands. This overrides Global Growth.")
+        
+        if not df_sales.empty and 'Brand' in df_sales.columns:
+            # Sort brands by Total Sales Volume (High to Low) agar brand besar muncul duluan
+            brand_volumes = df_sales.groupby('Brand')['Sales_Qty'].sum().sort_values(ascending=False)
+            sorted_brands = brand_volumes.index.tolist()
+            
+            # Buat grid 4 kolom untuk slider agar muat banyak
+            b_cols = st.columns(4)
+            brand_adjustments = {}
+            
+            for i, brand in enumerate(sorted_brands):
+                col_idx = i % 4
+                with b_cols[col_idx]:
+                    brand_adjustments[brand] = st.number_input(
+                        f"{brand} (%)", 
+                        min_value=-50, max_value=200, value=int(global_growth),
+                        step=5,
+                        key=f"slider_{brand}"
+                    )
+        else:
+            brand_adjustments = {}
+            st.warning("No Brand data available.")
 
     # ================ 2. ENGINE: GENERATE FORECAST ================
     
@@ -3933,220 +3954,231 @@ with tab7:
         last_history_date = sales_sorted_months[-1]
         next_12_months = [last_history_date + relativedelta(months=i) for i in range(1, 13)]
         
-        # Prepare Pivot Data (Sales per SKU per Month)
+        # Prepare Pivot Data
         sales_pivot = df_sales.pivot_table(
             index='SKU_ID', columns='Month', values='Sales_Qty', aggfunc='sum', fill_value=0
         )
         
         generated_data = []
         
-        # Iterate Generasi Forecast per SKU
-        for sku_id in sales_pivot.index:
-            sku_history = sales_pivot.loc[sku_id]
-            
-            # Get Brand for override check
-            sku_info = df_product[df_product['SKU_ID'] == sku_id]
-            sku_brand = sku_info['Brand'].iloc[0] if not sku_info.empty and 'Brand' in sku_info.columns else "Unknown"
-            
-            # Determine Growth Rate (Specific or Global)
-            growth_rate = brand_adjustments.get(sku_brand, global_growth) / 100.0
-            
-            row_dict = {'SKU_ID': sku_id}
-            
-            # Logic Calculation
-            if forecast_logic == "Seasonal (YoY Pattern)":
-                # Coba cari data tahun lalu untuk bulan yang sama
-                for future_date in next_12_months:
-                    last_year_date = future_date - relativedelta(years=1)
-                    
-                    if last_year_date in sku_history.index:
-                        base_val = sku_history[last_year_date]
-                        # Jika tahun lalu 0, fallback ke rata-rata 3 bulan terakhir
-                        if base_val == 0:
-                            base_val = sku_history.tail(3).mean()
-                    else:
-                        # Jika data tahun lalu tidak ada, pakai rata-rata
-                        base_val = sku_history.tail(3).mean()
-                    
-                    forecast_val = base_val * (1 + growth_rate)
-                    row_dict[future_date] = max(0, round(forecast_val))
-            
-            else: # Flat Run-Rate
-                base_val = sku_history.tail(3).mean()
-                for future_date in next_12_months:
-                    forecast_val = base_val * (1 + growth_rate)
-                    row_dict[future_date] = max(0, round(forecast_val))
-            
-            generated_data.append(row_dict)
+        # Iterate Forecast Generation
+        with st.spinner("Generating Forecast..."):
+            for sku_id in sales_pivot.index:
+                sku_history = sales_pivot.loc[sku_id]
+                
+                # Get Brand
+                sku_info = df_product[df_product['SKU_ID'] == sku_id]
+                sku_brand = sku_info['Brand'].iloc[0] if not sku_info.empty and 'Brand' in sku_info.columns else "Unknown"
+                
+                # Determine Growth Rate (Specific or Global)
+                growth_rate = brand_adjustments.get(sku_brand, global_growth) / 100.0
+                
+                row_dict = {'SKU_ID': sku_id}
+                
+                # Logic Calculation
+                if forecast_logic == "Seasonal (YoY Pattern)":
+                    for future_date in next_12_months:
+                        last_year_date = future_date - relativedelta(years=1)
+                        target_month_num = future_date.month
+                        
+                        # CEK ANOMALI
+                        is_anomaly = (sku_brand in anomaly_brands) and (target_month_num in anomaly_months)
+                        base_val = 0
+                        
+                        if is_anomaly:
+                            # Logic Normalisasi: Ambil rata-rata history sebelum periode anomali
+                            history_before = sku_history[sku_history.index < last_year_date]
+                            if not history_before.empty:
+                                base_val = history_before.tail(3).mean()
+                            else:
+                                base_val = sku_history.mean()
+                        else:
+                            # Logic Standard YoY
+                            if last_year_date in sku_history.index:
+                                base_val = sku_history[last_year_date]
+                                if base_val == 0:
+                                    base_val = sku_history.tail(3).mean()
+                            else:
+                                base_val = sku_history.tail(3).mean()
+                        
+                        forecast_val = base_val * (1 + growth_rate)
+                        row_dict[future_date] = max(0, round(forecast_val))
+                
+                else: # Flat Run-Rate
+                    base_val = sku_history.tail(3).mean()
+                    for future_date in next_12_months:
+                        forecast_val = base_val * (1 + growth_rate)
+                        row_dict[future_date] = max(0, round(forecast_val))
+                
+                generated_data.append(row_dict)
             
         # Create DataFrame
         df_rofo_gen = pd.DataFrame(generated_data)
         
-        # Add Value (Price) & Cost Information
+        # Add Product Info (Prices, Brand, Tier)
         df_rofo_gen = add_product_info_to_data(df_rofo_gen, df_product)
         
-        # ================ 3. FINANCIAL PROJECTION (Quarterly) ================
-        
-        # Helper untuk mendapatkan Quarter Label
+        # Helper Quarter
         def get_quarter(dt):
             return f"Q{(dt.month-1)//3 + 1}-{dt.strftime('%y')}"
 
-        # Prepare Aggregated Data for Charts
-        quarterly_metrics = []
-        monthly_metrics = []
+        # ================ 3. PREPARE AGGREGATED DATA ================
         
-        total_rev_proj = 0
-        total_margin_proj = 0
+        # Melt to Long Format for easier charting
+        id_vars = [c for c in df_rofo_gen.columns if not isinstance(c, datetime)]
+        df_long = df_rofo_gen.melt(
+            id_vars=id_vars, 
+            var_name='Month', 
+            value_name='Forecast_Qty'
+        )
         
-        for m in next_12_months:
-            if m in df_rofo_gen.columns:
-                # Calculate Monthly Metrics
-                m_qty = df_rofo_gen[m].sum()
-                
-                # Revenue & Margin Calc
-                m_rev = 0
-                m_margin = 0
-                
-                if 'Floor_Price' in df_rofo_gen.columns:
-                    m_rev = (df_rofo_gen[m] * df_rofo_gen['Floor_Price'].fillna(0)).sum()
-                    
-                if 'Floor_Price' in df_rofo_gen.columns and 'Net_Order_Price' in df_rofo_gen.columns:
-                    cost = (df_rofo_gen[m] * df_rofo_gen['Net_Order_Price'].fillna(0)).sum()
-                    m_margin = m_rev - cost
-                
-                monthly_metrics.append({
-                    'Month': m,
-                    'Month_Label': m.strftime('%b-%y'),
-                    'Quarter': get_quarter(m),
-                    'Qty': m_qty,
-                    'Revenue': m_rev,
-                    'Margin': m_margin
-                })
-                
-                total_rev_proj += m_rev
-                total_margin_proj += m_margin
+        # Calculate Value
+        df_long['Forecast_Value'] = df_long['Forecast_Qty'] * df_long['Floor_Price'].fillna(0)
+        df_long['Quarter'] = df_long['Month'].apply(get_quarter)
+        df_long['Month_Str'] = df_long['Month'].apply(lambda x: x.strftime('%b-%y'))
+        
+        # Totals for Metrics
+        total_rev_proj = df_long['Forecast_Value'].sum()
+        total_qty_proj = df_long['Forecast_Qty'].sum()
 
-        df_monthly_proj = pd.DataFrame(monthly_metrics)
-        
-        # Aggregate to Quarterly
-        df_quarterly_proj = df_monthly_proj.groupby('Quarter').agg({
-            'Qty': 'sum',
-            'Revenue': 'sum',
-            'Margin': 'sum'
-        }).reset_index()
-        
-        # Sort Quarter logic (simple string sort might fail Q1-25 vs Q4-24, so re-sort by month min)
-        # (Simplified for snippet: asumsi urutan muncul sudah kronologis karena loop next_12_months)
-        
-        # ================ 4. HIGH LEVEL INSIGHTS ================
+        # ================ 4. METRICS & VISUALIZATION ================
         
         st.divider()
-        st.markdown("### 💰 Financial Projections (Next 12 Months)")
+        st.markdown("### 📊 Forecast Summary (Next 12 Months)")
         
-        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+        # --- Top Metrics ---
+        kpi1, kpi2, kpi3 = st.columns(3)
         
         with kpi1:
-            st.metric("Projected Revenue", f"${total_rev_proj:,.0f}", help="Total Sales Value (Floor Price)")
+            st.metric("Total Forecast Value", f"${total_rev_proj:,.0f}", help="Total Revenue Projection (Floor Price)")
         with kpi2:
-            st.metric("Projected Margin", f"${total_margin_proj:,.0f}", help="Total Gross Margin")
+            st.metric("Total Forecast Qty", f"{total_qty_proj:,.0f}", help="Total Units")
         with kpi3:
-            margin_pct = (total_margin_proj / total_rev_proj * 100) if total_rev_proj > 0 else 0
-            st.metric("Avg Margin %", f"{margin_pct:.1f}%")
-        with kpi4:
-            total_qty = df_monthly_proj['Qty'].sum()
-            st.metric("Total Volume (Qty)", f"{total_qty:,.0f}")
+            # Average Price
+            avg_price_proj = total_rev_proj / total_qty_proj if total_qty_proj > 0 else 0
+            st.metric("Avg Price / Unit", f"${avg_price_proj:,.2f}")
 
-        # ================ 5. VISUALIZATION ================
-        
         st.divider()
         
-        # CHART 1: QUARTERLY BREAKDOWN
-        st.subheader("📊 Quarterly Performance Outlook")
+        # --- Filter Charts By Brand ---
+        st.markdown("#### 🔎 Filter Charts")
+        chart_brand_filter = st.multiselect(
+            "Select Brands to View in Charts (Leave empty for All)",
+            options=sorted_brands if 'sorted_brands' in locals() else [],
+            default=[]
+        )
         
-        col_chart1, col_chart2 = st.columns(2)
+        # Apply Filter to Long Data for Charts
+        chart_df = df_long.copy()
+        if chart_brand_filter:
+            chart_df = chart_df[chart_df['Brand'].isin(chart_brand_filter)]
+            
+        # --- CHART SECTION 1: QUARTERLY PERFORMANCE ---
+        st.subheader("📆 Quarterly Performance Outlook")
         
-        with col_chart1:
-            # Bar Chart: Revenue per Quarter
-            fig_q = go.Figure()
-            fig_q.add_trace(go.Bar(
-                x=df_quarterly_proj['Quarter'],
-                y=df_quarterly_proj['Revenue'],
-                name='Revenue',
-                marker_color='#667eea',
-                text=df_quarterly_proj['Revenue'].apply(lambda x: f"${x/1000:.0f}K"),
+        # Aggregasi Quarterly
+        q_agg = chart_df.groupby('Quarter').agg({
+            'Forecast_Qty': 'sum',
+            'Forecast_Value': 'sum'
+        }).reset_index()
+        
+        # Sort Quarter logic (simplified sorting by Q string)
+        q_agg = q_agg.sort_values('Quarter') 
+        
+        col_q1, col_q2 = st.columns(2)
+        
+        with col_q1:
+            # Quarterly Qty
+            fig_q_qty = go.Figure()
+            fig_q_qty.add_trace(go.Bar(
+                x=q_agg['Quarter'], y=q_agg['Forecast_Qty'],
+                name='Forecast Qty', marker_color='#667eea',
+                text=q_agg['Forecast_Qty'].apply(lambda x: f"{x/1000:.1f}k"),
                 textposition='auto'
             ))
-            fig_q.add_trace(go.Bar(
-                x=df_quarterly_proj['Quarter'],
-                y=df_quarterly_proj['Margin'],
-                name='Margin',
-                marker_color='#4CAF50',
-                text=df_quarterly_proj['Margin'].apply(lambda x: f"${x/1000:.0f}K"),
+            fig_q_qty.update_layout(title="Quarterly Forecast Quantity", plot_bgcolor='white', height=350)
+            st.plotly_chart(fig_q_qty, use_container_width=True)
+            
+        with col_q2:
+            # Quarterly Value
+            fig_q_val = go.Figure()
+            fig_q_val.add_trace(go.Bar(
+                x=q_agg['Quarter'], y=q_agg['Forecast_Value'],
+                name='Forecast Value', marker_color='#FF9800',
+                text=q_agg['Forecast_Value'].apply(lambda x: f"${x/1000:.0f}k"),
                 textposition='auto'
             ))
-            
-            fig_q.update_layout(
-                title="Revenue & Margin per Quarter",
-                xaxis_title="Quarter",
-                yaxis_title="Value ($)",
-                barmode='group',
-                height=400,
-                plot_bgcolor='white'
-            )
-            st.plotly_chart(fig_q, use_container_width=True)
-            
-        with col_chart2:
-            # Line Chart: Monthly Trend with Seasonality
-            fig_m = go.Figure()
-            fig_m.add_trace(go.Scatter(
-                x=df_monthly_proj['Month_Label'],
-                y=df_monthly_proj['Qty'],
-                mode='lines+markers+text',
-                name='Forecast Qty',
-                line=dict(color='#FF9800', width=4),
-                marker=dict(size=8),
-                fill='tozeroy',
-                fillcolor='rgba(255, 152, 0, 0.1)'
-            ))
-            
-            fig_m.update_layout(
-                title="12-Month Volume Trend (Seasonality View)",
-                xaxis_title="Month",
-                yaxis_title="Quantity",
-                height=400,
-                plot_bgcolor='white'
-            )
-            st.plotly_chart(fig_m, use_container_width=True)
+            fig_q_val.update_layout(title="Quarterly Forecast Value ($)", plot_bgcolor='white', height=350)
+            st.plotly_chart(fig_q_val, use_container_width=True)
 
-        # ================ 6. ACTIONABLE INSIGHTS TABLE ================
-        st.divider()
-        st.subheader("📋 Actionable Forecast Data (SKU Level)")
+        # --- CHART SECTION 2: BRAND PERFORMANCE ---
+        st.subheader("🏷️ 12-Month Forecast by Brand")
         
-        # Rename columns for friendly display
+        # Aggregasi per Brand (Total 12 Bulan)
+        # Note: Filter chart_brand_filter juga mempengaruhi ini agar konsisten
+        brand_agg = chart_df.groupby('Brand').agg({
+            'Forecast_Qty': 'sum',
+            'Forecast_Value': 'sum'
+        }).reset_index().sort_values('Forecast_Value', ascending=False)
+        
+        col_b1, col_b2 = st.columns(2)
+        
+        with col_b1:
+            # Brand Qty
+            fig_b_qty = px.bar(
+                brand_agg, x='Brand', y='Forecast_Qty',
+                title="Total Forecast Qty by Brand",
+                text_auto='.2s',
+                color_discrete_sequence=['#4CAF50']
+            )
+            fig_b_qty.update_layout(plot_bgcolor='white', height=400)
+            st.plotly_chart(fig_b_qty, use_container_width=True)
+            
+        with col_b2:
+            # Brand Value
+            fig_b_val = px.bar(
+                brand_agg, x='Brand', y='Forecast_Value',
+                title="Total Forecast Value by Brand ($)",
+                text_auto='.2s',
+                color_discrete_sequence=['#9C27B0']
+            )
+            fig_b_val.update_layout(plot_bgcolor='white', height=400)
+            st.plotly_chart(fig_b_val, use_container_width=True)
+
+        # ================ 5. DOWNLOAD TABLE ================
+        st.divider()
+        st.subheader("📋 Detailed Forecast Data")
+        
+        # Pivot back for display wide format
+        # Rename columns for display
         month_rename = {m: m.strftime('%b-%y') for m in next_12_months}
         df_display = df_rofo_gen.rename(columns=month_rename)
         
         # Calculate Total for sorting
-        df_display['Total_12M_Qty'] = df_display[list(month_rename.values())].sum(axis=1)
+        month_cols_str = list(month_rename.values())
+        df_display['Total_12M_Qty'] = df_display[month_cols_str].sum(axis=1)
         
-        # Estimate Value per SKU
+        # Estimate Value
         if 'Floor_Price' in df_display.columns:
-            df_display['Est_Revenue'] = df_display['Total_12M_Qty'] * df_display['Floor_Price']
+            df_display['Total_12M_Value'] = df_display['Total_12M_Qty'] * df_display['Floor_Price'].fillna(0)
         else:
-            df_display['Est_Revenue'] = 0
+            df_display['Total_12M_Value'] = 0
             
-        # Sort & Filter
-        df_display = df_display.sort_values('Est_Revenue', ascending=False)
+        # Apply Filter for Table (using the same filter as charts)
+        if chart_brand_filter:
+            df_display = df_display[df_display['Brand'].isin(chart_brand_filter)]
+            
+        # Sort
+        df_display = df_display.sort_values('Total_12M_Value', ascending=False)
         
-        # Columns to show
-        show_cols = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier', 'Est_Revenue', 'Total_12M_Qty'] + list(month_rename.values())
-        valid_show_cols = [c for c in show_cols if c in df_display.columns]
+        # Select Cols
+        show_cols = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier', 'Total_12M_Value', 'Total_12M_Qty'] + month_cols_str
+        valid_cols = [c for c in show_cols if c in df_display.columns]
         
-        # Highlight logic (optional styling or just clean table)
         st.dataframe(
-            df_display[valid_show_cols],
+            df_display[valid_cols],
             column_config={
-                "Est_Revenue": st.column_config.NumberColumn("Est. 12M Rev", format="$ %.0f"),
+                "Total_12M_Value": st.column_config.NumberColumn("Total Value", format="$ %.0f"),
                 "Total_12M_Qty": st.column_config.NumberColumn("Total Qty", format="%.0f"),
             },
             use_container_width=True,
@@ -4156,15 +4188,15 @@ with tab7:
         # Export
         csv_rofo = df_display.to_csv(index=False)
         st.download_button(
-            label="📥 Download 12-Month Rofo (.csv)",
+            label="📥 Download Forecast CSV",
             data=csv_rofo,
-            file_name=f"Strategic_Rofo_12M_{datetime.now().strftime('%Y%m%d')}.csv",
+            file_name=f"Rofo_12Month_Generated_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv",
             use_container_width=True
         )
 
     else:
-        st.error("❌ Data Sales tidak ditemukan. Mohon load data sales terlebih dahulu untuk membuat forecast.")
+        st.error("❌ Data Sales tidak ditemukan. Mohon load data sales terlebih dahulu.")
 
 # --- TAB 8: PROFITABILITY ANALYSIS ---
 with tab8:
