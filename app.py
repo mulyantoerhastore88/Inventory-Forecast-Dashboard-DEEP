@@ -4665,10 +4665,10 @@ with tab9:
             st.metric("Total SKUs", f"{len(df_reseller_forecast):,}")
         
         with col_kpi2:
-            st.metric("Historical Sales Qty", f"{format_number(total_historical_qty)}")
+            st.metric("Historical Sales Qty", f"{total_historical_qty:,.0f}")
         
         with col_kpi3:
-            st.metric("2026 Forecast Qty", f"{format_number(total_forecast_qty)}")
+            st.metric("2026 Forecast Qty", f"{total_forecast_qty:,.0f}")
         
         with col_kpi4:
             growth_pct = ((total_forecast_qty - total_historical_qty) / total_historical_qty * 100) if total_historical_qty > 0 else 0
@@ -4781,7 +4781,10 @@ with tab9:
                 forecast_qty = brand_data[reseller_forecast_cols].sum().sum() if reseller_forecast_cols else 0
                 
                 # Growth
-                growth = ((forecast_qty - hist_sales) / hist_sales * 100) if hist_sales > 0 else 0
+                if hist_sales > 0:
+                    growth = ((forecast_qty - hist_sales) / hist_sales * 100)
+                else:
+                    growth = 0
                 
                 brand_performance.append({
                     'Brand': brand,
@@ -4831,38 +4834,41 @@ with tab9:
             with chart_col2:
                 # Growth chart
                 growth_df = brand_df[brand_df['Historical_Sales'] > 0].copy()
-                growth_df = growth_df.sort_values('Growth_%', ascending=False)
-                
-                fig_growth = go.Figure()
-                
-                # Color based on growth
-                colors = ['#4CAF50' if x >= 0 else '#F44336' for x in growth_df['Growth_%'].head(10)]
-                
-                fig_growth.add_trace(go.Bar(
-                    x=growth_df['Brand'].head(10),
-                    y=growth_df['Growth_%'].head(10),
-                    name='Growth %',
-                    marker_color=colors,
-                    text=growth_df['Growth_%'].head(10).apply(lambda x: f"{x:+.0f}%"),
-                    textposition='auto'
-                ))
-                
-                fig_growth.update_layout(
-                    height=400,
-                    title='Brand Growth Rate (Historical → 2026)',
-                    xaxis_title='Brand',
-                    yaxis_title='Growth %',
-                    plot_bgcolor='white'
-                )
-                
-                st.plotly_chart(fig_growth, use_container_width=True)
+                if not growth_df.empty:
+                    growth_df = growth_df.sort_values('Growth_%', ascending=False)
+                    
+                    fig_growth = go.Figure()
+                    
+                    # Color based on growth
+                    colors = ['#4CAF50' if x >= 0 else '#F44336' for x in growth_df['Growth_%'].head(10)]
+                    
+                    fig_growth.add_trace(go.Bar(
+                        x=growth_df['Brand'].head(10),
+                        y=growth_df['Growth_%'].head(10),
+                        name='Growth %',
+                        marker_color=colors,
+                        text=growth_df['Growth_%'].head(10).apply(lambda x: f"{x:+.0f}%"),
+                        textposition='auto'
+                    ))
+                    
+                    fig_growth.update_layout(
+                        height=400,
+                        title='Brand Growth Rate (Historical → 2026)',
+                        xaxis_title='Brand',
+                        yaxis_title='Growth %',
+                        plot_bgcolor='white'
+                    )
+                    
+                    st.plotly_chart(fig_growth, use_container_width=True)
+                else:
+                    st.info("No historical sales data available for growth calculation")
             
             # Brand summary table
             st.markdown("#### 📋 Brand Performance Summary")
             
             display_brand_df = brand_df.copy()
-            display_brand_df['Historical_Sales'] = display_brand_df['Historical_Sales'].apply(format_number)
-            display_brand_df['2026_Forecast'] = display_brand_df['2026_Forecast'].apply(format_number)
+            display_brand_df['Historical_Sales'] = display_brand_df['Historical_Sales'].apply(lambda x: f"{x:,.0f}")
+            display_brand_df['2026_Forecast'] = display_brand_df['2026_Forecast'].apply(lambda x: f"{x:,.0f}")
             display_brand_df['Growth_%'] = display_brand_df['Growth_%'].apply(lambda x: f"{x:+.1f}%")
             
             st.dataframe(
@@ -4948,11 +4954,11 @@ with tab9:
             st.markdown("#### 📋 Quarterly Summary")
             
             display_quarter_df = quarter_df.copy()
-            display_quarter_df['Historical'] = display_quarter_df['Historical'].apply(format_number)
-            display_quarter_df['Forecast'] = display_quarter_df['Forecast'].apply(format_number)
+            display_quarter_df['Historical'] = display_quarter_df['Historical'].apply(lambda x: f"{x:,.0f}")
+            display_quarter_df['Forecast'] = display_quarter_df['Forecast'].apply(lambda x: f"{x:,.0f}")
             display_quarter_df['Growth'] = ((display_quarter_df['Forecast'].str.replace(',', '').astype(float) - 
-                                           display_quarter_df['Historical'].str.replace(',', '').astype(float)) / 
-                                          display_quarter_df['Historical'].str.replace(',', '').astype(float) * 100).apply(lambda x: f"{x:+.1f}%" if pd.notnull(x) else "N/A")
+                                          display_quarter_df['Historical'].str.replace(',', '').astype(float)) / 
+                                         display_quarter_df['Historical'].str.replace(',', '').astype(float) * 100).apply(lambda x: f"{x:+.1f}%" if pd.notnull(x) else "N/A")
             
             st.dataframe(
                 display_quarter_df,
@@ -5008,7 +5014,7 @@ with tab9:
         # Format numbers
         for col in month_cols[:6]:
             if col in display_df.columns:
-                display_df[col] = display_df[col].apply(format_number)
+                display_df[col] = display_df[col].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) else "0")
         
         st.dataframe(
             display_df,
@@ -5029,45 +5035,43 @@ with tab9:
         # ================ SECTION 6: INSIGHTS ================
         st.divider()
         st.subheader("💡 Channel Insights")
-
+        
         insights = []
-
+        
         # Insight 1: Total comparison
-        insights.append(f"**📊 Total Volume:** Historical: {format_number(total_historical_qty)} units → 2026 Forecast: {format_number(total_forecast_qty)} units")
-
+        insights.append(f"**📊 Total Volume:** Historical Sales (2024-2025): {total_historical_qty:,.0f} units → 2026 Forecast: {total_forecast_qty:,.0f} units")
+        
         # Insight 2: Growth rate
         if total_historical_qty > 0:
             overall_growth = ((total_forecast_qty - total_historical_qty) / total_historical_qty * 100)
             growth_color = "📈" if overall_growth > 0 else "📉"
             insights.append(f"**{growth_color} Overall Growth:** {overall_growth:+.1f}% from historical to 2026 forecast")
-
-        # Insight 3: Top brand - FIXED
-        if 'brand_df' in locals() and not brand_df.empty:
+        else:
+            insights.append("**📊 Historical Data:** No historical sales data available for comparison")
+        
+        # Insight 3: Top brand
+        if 'brand_df' in locals() and not brand_df.empty and 'Brand' in brand_df.columns:
             top_brand = brand_df.iloc[0]
-    
-            # Get top brand forecast quantity
-            top_brand_forecast = top_brand['2026_Forecast']
-    
-            # Convert to float (handle string formatting)
-            try:
-                if isinstance(top_brand_forecast, str):
-                    # Remove commas and convert to float
-                    top_brand_qty = float(str(top_brand_forecast).replace(',', ''))
-                else:
-                    top_brand_qty = float(top_brand_forecast)
-            except:
-                top_brand_qty = 0
-    
-            # Calculate share
-            brand_share = (top_brand_qty / total_forecast_qty * 100) if total_forecast_qty > 0 else 0
-    
-            insights.append(f"**🏆 Top Brand:** {top_brand['Brand']} forecasts {format_number(top_brand['2026_Forecast'])} units ({brand_share:.1f}% of total forecast)")
-
+            brand_name = top_brand['Brand']
+            forecast_qty = top_brand['2026_Forecast']
+            
+            # Calculate brand share
+            if total_forecast_qty > 0:
+                brand_share = (forecast_qty / total_forecast_qty * 100)
+                insights.append(f"**🏆 Top Brand:** {brand_name} forecasts {forecast_qty:,.0f} units ({brand_share:.1f}% of total forecast)")
+            else:
+                insights.append(f"**🏆 Top Brand:** {brand_name} forecasts {forecast_qty:,.0f} units")
+        
         # Insight 4: Forecast coverage
         if reseller_forecast_cols:
             forecast_months = len(reseller_forecast_cols)
             insights.append(f"**📅 Forecast Period:** {forecast_months} months (Jan-Dec 2026)")
-
+        
+        # Insight 5: Historical period
+        if reseller_historical_cols:
+            historical_months = len(reseller_historical_cols)
+            insights.append(f"**📊 Historical Period:** {historical_months} months (Jan 2024 - Dec 2025)")
+        
         # Display insights
         for insight in insights:
             st.info(insight)
