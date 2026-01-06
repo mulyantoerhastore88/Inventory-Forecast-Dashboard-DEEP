@@ -4136,7 +4136,8 @@ with tab7:
                 titlefont=dict(color='#FF9800'),
                 tickfont=dict(color='#FF9800'),
                 overlaying='y',
-                side='right'
+                side='right',
+                tickprefix='$'
             ),
             hovermode='x unified',
             plot_bgcolor='white',
@@ -4251,10 +4252,16 @@ with tab7:
             display_brand_df = brand_df.copy()
             display_brand_df['Total_Qty'] = display_brand_df['Total_Qty'].apply(format_number)
             display_brand_df['Total_Value'] = display_brand_df['Total_Value'].apply(lambda x: f"${format_number(x)}")
-            display_brand_df['Avg_Value_per_SKU'] = display_brand_df.apply(
-                lambda row: f"${format_number(row['Total_Value'].replace('$', '').replace(',', '') / row['SKU_Count'])}" 
-                if row['SKU_Count'] > 0 else "$0", axis=1
-            )
+            
+            # Hitung average value per SKU
+            def calculate_avg_value(row):
+                try:
+                    value_num = float(str(row['Total_Value']).replace('$', '').replace(',', ''))
+                    return f"${format_number(value_num / row['SKU_Count'])}"
+                except:
+                    return "$0"
+            
+            display_brand_df['Avg_Value_per_SKU'] = display_brand_df.apply(calculate_avg_value, axis=1)
             
             st.dataframe(
                 display_brand_df[['Brand', 'SKU_Count', 'Total_Qty', 'Total_Value', 'Avg_Value_per_SKU']],
@@ -4304,7 +4311,8 @@ with tab7:
                     mode='lines+markers',
                     yaxis='y2',
                     line=dict(color='#4CAF50', width=3),
-                    marker=dict(size=8, color='#4CAF50')
+                    marker=dict(size=8, color='#4CAF50'),
+                    hovertemplate='<b>%{x}</b><br>Growth: %{y:.0f}%<extra></extra>'
                 ))
                 
                 fig_q_qty.update_layout(
@@ -4315,8 +4323,7 @@ with tab7:
                     yaxis2=dict(
                         title='Growth %',
                         overlaying='y',
-                        side='right',
-                        tickformat='.0f%'
+                        side='right'
                     ),
                     plot_bgcolor='white'
                 )
@@ -4343,7 +4350,8 @@ with tab7:
                         mode='lines+markers',
                         yaxis='y2',
                         line=dict(color='#9C27B0', width=3),
-                        marker=dict(size=8, color='#9C27B0')
+                        marker=dict(size=8, color='#9C27B0'),
+                        hovertemplate='<b>%{x}</b><br>Growth: %{y:.0f}%<extra></extra>'
                     ))
                     
                     fig_q_value.update_layout(
@@ -4354,8 +4362,7 @@ with tab7:
                         yaxis2=dict(
                             title='Growth %',
                             overlaying='y',
-                            side='right',
-                            tickformat='.0f%'
+                            side='right'
                         ),
                         plot_bgcolor='white'
                     )
