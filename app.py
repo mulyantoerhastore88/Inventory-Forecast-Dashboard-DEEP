@@ -3971,9 +3971,9 @@ with tab7:
                 
                 # Get month columns
                 ecomm_forecast_month_cols = [col for col in forecast_pivot.columns 
-                                           if any(m in col.lower() for m in 
-                                                 ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 
-                                                  'jul', 'aug', 'sep', 'oct', 'nov', 'dec'])]
+                                            if any(m in col.lower() for m in 
+                                                ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 
+                                                 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'])]
                 
                 if ecomm_forecast_month_cols:
                     df_ecomm_forecast = forecast_pivot
@@ -3987,21 +3987,16 @@ with tab7:
     else:
         st.success(f"✅ Ecommerce forecast loaded: {len(df_ecomm_forecast)} SKUs, {len(ecomm_forecast_month_cols)} months")
     
-    # ================ FUNGSI BANTU ================
+    # ================ FUNGSI BANTU LOKAL ================
     def format_number(value):
         """Format angka dengan koma, tanpa desimal"""
         try:
-            if pd.isna(value):
-                return "0"
+            if pd.isna(value): return "0"
             value = float(value)
-            if value == 0:
-                return "0"
-            elif abs(value) >= 1000:
-                return f"{value:,.0f}"
-            else:
-                return f"{value:.0f}"
-        except:
-            return str(value)
+            if value == 0: return "0"
+            elif abs(value) >= 1000: return f"{value:,.0f}"
+            else: return f"{value:.0f}"
+        except: return str(value)
     
     def parse_month_str(month_str):
         """Parse bulan dari string format"""
@@ -4015,14 +4010,7 @@ with tab7:
             return datetime.now()
         except:
             return datetime.now()
-    
-    def calculate_quarter(month_date):
-        """Tentukan quarter dari bulan"""
-        if isinstance(month_date, str):
-            month_date = parse_month_str(month_date)
-        quarter = (month_date.month - 1) // 3 + 1
-        return f"Q{quarter}-{month_date.strftime('%y')}"
-    
+
     def calculate_monthly_value(df_forecast, month_cols, df_product):
         """Hitung value (revenue projection) untuk setiap bulan"""
         if df_forecast.empty or not month_cols:
@@ -4048,9 +4036,10 @@ with tab7:
         
         return pd.DataFrame(monthly_values)
     
-    # ================ MAIN DASHBOARD ================
+    # ================ DASHBOARD CONTENT ================
     if ecomm_forecast_month_cols:
-        # ================ SECTION 1: OVERVIEW ================
+        
+        # --- SECTION 1: KPI OVERVIEW ---
         st.divider()
         st.subheader("📈 Ecommerce Forecast Overview")
         
@@ -4064,370 +4053,262 @@ with tab7:
             for month in ecomm_forecast_month_cols:
                 total_value += (df_with_price[month] * df_with_price['Floor_Price'].fillna(0)).sum()
         
-        # Display KPIs
         col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
-        
-        with col_kpi1:
-            st.metric("Total SKUs", f"{len(df_ecomm_forecast):,}")
-        
-        with col_kpi2:
-            st.metric("Total Forecast Qty", f"{format_number(total_qty)}")
-        
-        with col_kpi3:
-            st.metric("Total Forecast Value", f"Rp {format_number(total_value)}")
-        
-        with col_kpi4:
+        with col_kpi1: st.metric("Total SKUs", f"{len(df_ecomm_forecast):,}")
+        with col_kpi2: st.metric("Total Forecast Qty", f"{format_number(total_qty)}")
+        with col_kpi3: st.metric("Total Forecast Value", f"Rp {format_number(total_value)}")
+        with col_kpi4: 
             avg_monthly = total_qty / len(ecomm_forecast_month_cols) if ecomm_forecast_month_cols else 0
             st.metric("Avg Monthly Qty", f"{format_number(avg_monthly)}")
         
-        # ================ SECTION 2: MONTHLY TREND (MODIFIED) ================
+        # --- SECTION 2: MONTHLY TREND (LINE CHART) ---
         st.divider()
-        st.subheader("📊 Monthly Forecast Trend by Brand")
+        st.subheader("📊 Monthly Forecast Trend by Brand (Line Chart)")
         
         # Filter controls
         trend_col1, trend_col2, trend_col3 = st.columns(3)
         
         with trend_col1:
-            # Brand filter
             all_brands = df_ecomm_forecast['Brand'].unique().tolist() if 'Brand' in df_ecomm_forecast.columns else []
-            # Default select top 5 brands by volume to avoid messy chart initially
+            # Default select top 5
+            default_brands = []
             if all_brands:
-                top_5_brands = df_ecomm_forecast.groupby('Brand')[ecomm_forecast_month_cols].sum().sum(axis=1).nlargest(5).index.tolist()
-                default_brands = top_5_brands
-            else:
-                default_brands = []
+                default_brands = df_ecomm_forecast.groupby('Brand')[ecomm_forecast_month_cols].sum().sum(axis=1).nlargest(5).index.tolist()
 
-            selected_brands = st.multiselect(
-                "Filter by Brand",
-                options=all_brands,
-                default=default_brands,
-                help="Select brands to compare in the chart",
-                key="ecomm_brand_filter"
-            )
+            selected_brands = st.multiselect("Filter by Brand", options=all_brands, default=default_brands, key="ecomm_brand_filter")
         
         with trend_col2:
-            # Time period
-            display_months = st.slider(
-                "Months to Display",
-                min_value=6,
-                max_value=len(ecomm_forecast_month_cols),
-                value=min(12, len(ecomm_forecast_month_cols)),
-                key="ecomm_month_slider"
-            )
+            display_months = st.slider("Months to Display", 6, len(ecomm_forecast_month_cols), min(12, len(ecomm_forecast_month_cols)), key="ecomm_month_slider")
         
         with trend_col3:
-            # Value toggle
-            show_value = st.checkbox("Show Total Value Projection", value=True)
+            show_value = st.checkbox("Show Total Value (Secondary Axis)", value=True)
         
-        # Filter data based on selection
+        # Filter logic
         filtered_ecomm = df_ecomm_forecast.copy()
         if selected_brands and 'Brand' in filtered_ecomm.columns:
             filtered_ecomm = filtered_ecomm[filtered_ecomm['Brand'].isin(selected_brands)]
         
-        # Get months to display
+        # Sort months
         display_month_cols = ecomm_forecast_month_cols[-display_months:] if display_months < len(ecomm_forecast_month_cols) else ecomm_forecast_month_cols
-        
-        # Sort month columns properly using the helper function
         sorted_month_cols = sorted(display_month_cols, key=parse_month_str)
 
-        # Create chart
+        # Generate Line Chart
         fig = go.Figure()
 
-        # 1. ADD BARS FOR EACH BRAND
+        # Add Lines for Brands
         if 'Brand' in filtered_ecomm.columns and not filtered_ecomm.empty:
-            # Get unique brands in the filtered data
-            brands_to_plot = filtered_ecomm['Brand'].unique()
-            
-            # Sort brands by total volume so the stacking order is consistent (Largest at bottom usually looks best)
             brand_volumes = filtered_ecomm.groupby('Brand')[sorted_month_cols].sum().sum(axis=1).sort_values(ascending=False)
-            
             for brand in brand_volumes.index:
-                brand_data = filtered_ecomm[filtered_ecomm['Brand'] == brand]
-                # Sum qty per month for this brand
-                brand_monthly_qty = brand_data[sorted_month_cols].sum()
-                
-                fig.add_trace(go.Bar(
-                    x=brand_monthly_qty.index,
-                    y=brand_monthly_qty.values,
-                    name=brand,
-                    # Color will be assigned automatically by Plotly
+                brand_monthly_qty = filtered_ecomm[filtered_ecomm['Brand'] == brand][sorted_month_cols].sum()
+                fig.add_trace(go.Scatter(
+                    x=brand_monthly_qty.index, y=brand_monthly_qty.values, name=brand,
+                    mode='lines+markers', line=dict(width=3), marker=dict(size=7),
                     hovertemplate=f'<b>%{{x}}</b><br>{brand}: %{{y:,.0f}} units<extra></extra>'
                 ))
         else:
-            # Fallback if no brands selected or no Brand column
-            total_qty = filtered_ecomm[sorted_month_cols].sum()
-            fig.add_trace(go.Bar(
-                x=total_qty.index,
-                y=total_qty.values,
-                name='Total Qty',
-                marker_color='#667eea',
+            total_qty_series = filtered_ecomm[sorted_month_cols].sum()
+            fig.add_trace(go.Scatter(
+                x=total_qty_series.index, y=total_qty_series.values, name='Total Qty',
+                mode='lines+markers', line=dict(color='#667eea', width=4),
                 hovertemplate='<b>%{x}</b><br>Total: %{y:,.0f} units<extra></extra>'
             ))
         
-        # 2. ADD TOTAL VALUE LINE (Secondary Axis)
+        # Add Total Value Line
         if show_value:
-            # Calculate total value for ALL selected brands combined
             monthly_value_df = calculate_monthly_value(filtered_ecomm, sorted_month_cols, df_product)
-            
             if not monthly_value_df.empty:
-                # Ensure monthly_value_df is sorted same as the chart x-axis
                 monthly_value_df['Month_Date'] = monthly_value_df['Month'].apply(parse_month_str)
                 monthly_value_df = monthly_value_df.set_index('Month').reindex(sorted_month_cols).reset_index()
-                
                 fig.add_trace(go.Scatter(
-                    x=monthly_value_df['Month'],
-                    y=monthly_value_df['Value'],
-                    name='Total Value (Rp)',
-                    mode='lines+markers',
-                    line=dict(color='#333333', width=3, dash='dot'), # Dark grey dashed line to stand out
-                    marker=dict(size=6, color='#333333', symbol='diamond'),
-                    hovertemplate='<b>%{x}</b><br>Total Value: Rp %{y:,.0f}<extra></extra>',
-                    yaxis='y2'
+                    x=monthly_value_df['Month'], y=monthly_value_df['Value'], name='Total Value (Rp)',
+                    mode='lines+markers', line=dict(color='#333333', width=2, dash='dot'), 
+                    marker=dict(size=5, color='#333333', symbol='x'), yaxis='y2', opacity=0.6,
+                    hovertemplate='<b>%{x}</b><br>Total Value: Rp %{y:,.0f}<extra></extra>'
                 ))
         
-        # Update layout
-        layout_config = {
-            'height': 550,
-            'title': f'Monthly Forecast Trend (Stacked by Brand)',
-            'xaxis_title': 'Month',
-            'yaxis_title': 'Quantity (units)',
-            'barmode': 'stack',  # INI KUNCINYA: Menumpuk baris
-            'hovermode': 'x unified', # Memudahkan perbandingan saat hover
-            'plot_bgcolor': 'white',
-            'showlegend': True,
-            'legend': dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
-            )
-        }
-        
-        # Add secondary axis if showing value
-        if show_value:
-            layout_config['yaxis2'] = {
-                'title': 'Total Value (Rp)',
-                'overlaying': 'y',
-                'side': 'right',
-                'showgrid': False
-            }
-            # ========================================================
-        # FIX: Re-calculate monthly_df untuk mencegah Error di Section Insights
-        # ========================================================
+        # Re-calc monthly_df for Insights Section
         monthly_totals = filtered_ecomm[sorted_month_cols].sum()
-        monthly_df = pd.DataFrame({
-            'Month': monthly_totals.index,
-            'Quantity': monthly_totals.values
-        })
-        # Kita perlu kolom Month_Display karena dipakai di logic Insight di bawah
+        monthly_df = pd.DataFrame({'Month': monthly_totals.index, 'Quantity': monthly_totals.values})
         monthly_df['Month_Display'] = monthly_df['Month'] 
-        # ========================================================
 
-    
+        # Chart Layout
+        layout_config = {
+            'height': 500, 'title': 'Monthly Forecast Trend (Line Chart)',
+            'xaxis_title': 'Month', 'yaxis_title': 'Quantity (units)',
+            'hovermode': 'x unified', 'plot_bgcolor': 'white', 'showlegend': True,
+            'legend': dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        }
+        if show_value:
+            layout_config['yaxis2'] = {'title': 'Total Value (Rp)', 'overlaying': 'y', 'side': 'right', 'showgrid': False}
+        
         fig.update_layout(**layout_config)
         st.plotly_chart(fig, use_container_width=True)
-        
-        # ================ SECTION 3: BRAND ANALYSIS ================
+
+        # --- SECTION 3: NEW QUARTERLY ANALYSIS ---
         st.divider()
-        st.subheader("🏷️ Brand Performance")
+        st.subheader("📅 Quarterly Brand Analysis (Qty & Value)")
         
-        if 'Brand' in filtered_ecomm.columns and not filtered_ecomm.empty:
-            # Calculate brand totals
-            brand_totals = []
+        # 1. Prepare Quarter Logic
+        q_map = {'Q1': ['jan', 'feb', 'mar'], 'Q2': ['apr', 'may', 'jun'], 
+                 'Q3': ['jul', 'aug', 'sep'], 'Q4': ['oct', 'nov', 'dec']}
+        
+        quarter_cols_map = {'Q1': [], 'Q2': [], 'Q3': [], 'Q4': []}
+        
+        # Sort cols first
+        all_cols_sorted = sorted(ecomm_forecast_month_cols, key=parse_month_str)
+        
+        for col in all_cols_sorted:
+            m_str = col.split('-')[0].lower()[:3]
+            for q, months in q_map.items():
+                if m_str in months:
+                    quarter_cols_map[q].append(col)
+        
+        # Identify available quarters (those that have data)
+        active_quarters = [q for q, cols in quarter_cols_map.items() if len(cols) > 0]
+        
+        if 'Brand' in df_ecomm_forecast.columns and active_quarters:
+            # Prepare Tabs for Qty vs Value
+            q_tab1, q_tab2 = st.tabs(["📦 By Quantity", "💰 By Value (Rp)"])
             
-            for brand in filtered_ecomm['Brand'].unique():
-                brand_data = filtered_ecomm[filtered_ecomm['Brand'] == brand]
-                brand_qty = brand_data[display_month_cols].sum().sum()
-                
-                # Calculate value
-                brand_with_price = add_product_info_to_data(brand_data, df_product)
-                brand_value = 0
-                if 'Floor_Price' in brand_with_price.columns:
-                    for month in display_month_cols:
-                        brand_value += (brand_with_price[month] * brand_with_price['Floor_Price'].fillna(0)).sum()
-                
-                brand_totals.append({
-                    'Brand': brand,
-                    'Qty': brand_qty,
-                    'Value': brand_value,
-                    'SKU_Count': len(brand_data)
-                })
-            
-            brand_df = pd.DataFrame(brand_totals)
-            brand_df = brand_df.sort_values('Value' if show_value else 'Qty', ascending=False)
-            
-            # Display charts
-            chart_col1, chart_col2 = st.columns(2)
-            
-            with chart_col1:
-                # Quantity chart
-                fig_brand_qty = go.Figure()
-                fig_brand_qty.add_trace(go.Bar(
-                    x=brand_df['Brand'].head(10),
-                    y=brand_df['Qty'].head(10),
-                    name='Quantity',
-                    marker_color='#667eea',
-                    text=brand_df['Qty'].head(10).apply(format_number),
-                    textposition='auto'
-                ))
-                
-                fig_brand_qty.update_layout(
-                    height=400,
-                    title='Top 10 Brands by Quantity',
-                    xaxis_title='Brand',
-                    yaxis_title='Quantity',
-                    plot_bgcolor='white'
-                )
-                st.plotly_chart(fig_brand_qty, use_container_width=True)
-            
-            with chart_col2:
-                if show_value:
-                    # Value chart
-                    fig_brand_value = go.Figure()
-                    fig_brand_value.add_trace(go.Bar(
-                        x=brand_df['Brand'].head(10),
-                        y=brand_df['Value'].head(10),
-                        name='Value (Rp )',
-                        marker_color='#FF9800',
-                        text=brand_df['Value'].head(10).apply(lambda x: f"Rp {format_number(x)}"),
-                        textposition='auto'
-                    ))
+            # --- Tab Qty ---
+            with q_tab1:
+                # Group by Brand
+                q_brand_qty = []
+                for brand in df_ecomm_forecast['Brand'].unique():
+                    row = {'Brand': brand}
+                    total_row = 0
+                    brand_data = df_ecomm_forecast[df_ecomm_forecast['Brand'] == brand]
                     
-                    fig_brand_value.update_layout(
-                        height=400,
-                        title='Top 10 Brands by Value',
-                        xaxis_title='Brand',
-                        yaxis_title='Value (Rp )',
-                        plot_bgcolor='white'
-                    )
-                    st.plotly_chart(fig_brand_value, use_container_width=True)
+                    for q in active_quarters:
+                        cols = quarter_cols_map[q]
+                        q_val = brand_data[cols].sum().sum()
+                        row[q] = q_val
+                        total_row += q_val
+                    
+                    row['Total'] = total_row
+                    q_brand_qty.append(row)
+                
+                df_q_qty = pd.DataFrame(q_brand_qty).sort_values('Total', ascending=False)
+                
+                # Format for display
+                df_q_qty_disp = df_q_qty.copy()
+                for col in df_q_qty_disp.columns:
+                    if col != 'Brand':
+                        df_q_qty_disp[col] = df_q_qty_disp[col].apply(format_number)
+                
+                # Visual Heatmap
+                fig_heat_qty = go.Figure(data=go.Heatmap(
+                    z=df_q_qty[active_quarters].head(10).values,
+                    x=active_quarters,
+                    y=df_q_qty['Brand'].head(10),
+                    colorscale='Blues',
+                    text=df_q_qty[active_quarters].head(10).values,
+                    texttemplate="%{text:,.0f}"
+                ))
+                fig_heat_qty.update_layout(height=400, title="Top 10 Brands - Quarterly Quantity Heatmap")
+                st.plotly_chart(fig_heat_qty, use_container_width=True)
+                
+                st.markdown("#### 📋 Quarterly Quantity Table")
+                st.dataframe(df_q_qty_disp, use_container_width=True)
+
+            # --- Tab Value ---
+            with q_tab2:
+                # Check price
+                df_for_val = add_product_info_to_data(df_ecomm_forecast, df_product)
+                if 'Floor_Price' in df_for_val.columns:
+                    # Pre-calculate totals per row to optimize
+                    df_for_val['Temp_Price'] = df_for_val['Floor_Price'].fillna(0)
+                    
+                    q_brand_val = []
+                    for brand in df_for_val['Brand'].unique():
+                        row = {'Brand': brand}
+                        total_row = 0
+                        brand_data = df_for_val[df_for_val['Brand'] == brand]
+                        
+                        for q in active_quarters:
+                            cols = quarter_cols_map[q]
+                            # Vectorized calc: Sum(Qty * Price) for specific columns
+                            q_val = 0
+                            for c in cols:
+                                q_val += (brand_data[c] * brand_data['Temp_Price']).sum()
+                            
+                            row[q] = q_val
+                            total_row += q_val
+                        
+                        row['Total'] = total_row
+                        q_brand_val.append(row)
+                    
+                    df_q_val = pd.DataFrame(q_brand_val).sort_values('Total', ascending=False)
+                    
+                    # Format
+                    df_q_val_disp = df_q_val.copy()
+                    for col in df_q_val_disp.columns:
+                        if col != 'Brand':
+                            df_q_val_disp[col] = df_q_val_disp[col].apply(lambda x: f"Rp {format_number(x)}")
+                    
+                    # Visual Heatmap
+                    fig_heat_val = go.Figure(data=go.Heatmap(
+                        z=df_q_val[active_quarters].head(10).values,
+                        x=active_quarters,
+                        y=df_q_val['Brand'].head(10),
+                        colorscale='Greens',
+                        texttemplate="Rp %{text:.2s}" # Short format for Rupiah
+                    ))
+                    fig_heat_val.update_layout(height=400, title="Top 10 Brands - Quarterly Value Heatmap")
+                    st.plotly_chart(fig_heat_val, use_container_width=True)
+                    
+                    st.markdown("#### 📋 Quarterly Value Table")
+                    st.dataframe(df_q_val_disp, use_container_width=True)
                 else:
-                    st.info("Enable 'Show Value Projection' to see brand value analysis")
-            
-            # Brand summary table
-            st.markdown("#### 📋 Brand Summary")
-            display_brand_df = brand_df.copy()
-            display_brand_df['Qty'] = display_brand_df['Qty'].apply(format_number)
-            display_brand_df['Value'] = display_brand_df['Value'].apply(lambda x: f"Rp {format_number(x)}")
-            display_brand_df['Qty_Share'] = (display_brand_df['Qty'].str.replace(',', '').astype(float) / total_qty * 100).apply(lambda x: f"{x:.1f}%")
-            
-            st.dataframe(
-                display_brand_df[['Brand', 'SKU_Count', 'Qty', 'Qty_Share', 'Value']],
-                use_container_width=True,
-                height=300
-            )
-        
-        # ================ SECTION 4: DATA EXPLORER ================
+                    st.warning("⚠️ Cannot calculate value: 'Floor_Price' missing in Product Master")
+
+        # --- SECTION 4: DATA EXPLORER ---
         st.divider()
         st.subheader("📋 Data Explorer")
         
-        # Explorer controls
         exp_col1, exp_col2 = st.columns(2)
-        
         with exp_col1:
-            explorer_brands = st.multiselect(
-                "Filter Brands for Table",
-                options=all_brands,
-                default=[],
-                key="explorer_brand_filter"
-            )
-        
+            explorer_brands = st.multiselect("Filter Brands for Table", options=all_brands, default=[], key="explorer_brand_filter")
         with exp_col2:
-            table_months = st.slider(
-                "Months to Show in Table",
-                min_value=3,
-                max_value=len(ecomm_forecast_month_cols),
-                value=6,
-                key="table_month_slider"
-            )
+            table_months = st.slider("Months to Show in Table", 3, len(ecomm_forecast_month_cols), 6, key="table_month_slider")
         
-        # Prepare table data
         table_data = df_ecomm_forecast.copy()
-        
         if explorer_brands and 'Brand' in table_data.columns:
             table_data = table_data[table_data['Brand'].isin(explorer_brands)]
         
-        # Select columns to display
-        table_month_cols = ecomm_forecast_month_cols[-table_months:] if table_months < len(ecomm_forecast_month_cols) else ecomm_forecast_month_cols
+        table_month_cols = sorted_month_cols[-table_months:]
         display_cols = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier'] + table_month_cols
-        
-        # Filter available columns
         available_cols = [col for col in display_cols if col in table_data.columns]
-        table_data = table_data[available_cols].head(20)
         
-        # Format numbers
+        table_disp = table_data[available_cols].head(50).copy()
         for col in table_month_cols:
-            if col in table_data.columns:
-                table_data[col] = table_data[col].apply(format_number)
+            if col in table_disp.columns: table_disp[col] = table_disp[col].apply(format_number)
+            
+        st.dataframe(table_disp, use_container_width=True, height=400)
         
-        # Display table
-        st.dataframe(
-            table_data,
-            use_container_width=True,
-            height=400
-        )
-        
-        # Download button
         csv = table_data.to_csv(index=False)
-        st.download_button(
-            label="📥 Download Ecommerce Forecast Data",
-            data=csv,
-            file_name=f"ecomm_forecast_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-        
-        # ================ SECTION 5: INSIGHTS ================
+        st.download_button("📥 Download Forecast CSV", data=csv, file_name=f"ecomm_forecast_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
+
+        # --- SECTION 5: INSIGHTS ---
         st.divider()
         st.subheader("💡 Key Insights")
         
         insights = []
-        
-        # Insight 1: Total forecast
         insights.append(f"**📊 Total Forecast:** {format_number(total_qty)} units (Rp {format_number(total_value)})")
-        
-        # Insight 2: Monthly average
-        if len(ecomm_forecast_month_cols) > 0:
-            monthly_avg = total_qty / len(ecomm_forecast_month_cols)
-            insights.append(f"**📈 Monthly Average:** {format_number(monthly_avg)} units")
-        
-        # Insight 3: Peak month
         if not monthly_df.empty:
             peak_month = monthly_df.loc[monthly_df['Quantity'].idxmax()]
             insights.append(f"**🎯 Peak Month:** {peak_month['Month_Display']} ({format_number(peak_month['Quantity'])} units)")
         
-        # Insight 4: Top brand - FIXED
-        if 'brand_df' in locals() and not brand_df.empty:
-            top_brand = brand_df.iloc[0]
-    
-            # Cari kolom yang benar untuk quantity
-            qty_value = 0
-            # Coba berbagai kemungkinan nama kolom
-            possible_qty_cols = ['Qty', 'Quantity', 'Total_Qty', 'Forecast_Qty', '2026_Forecast', 'Historical_Sales']
-    
-            for col in possible_qty_cols:
-                if col in top_brand.index:
-                    qty_value = top_brand[col]
-                    break
-    
-            # Jika tidak ditemukan, cari kolom pertama yang numeric selain 'Brand' dan 'SKU_Count'
-            if qty_value == 0:
-                for col in top_brand.index:
-                    if col not in ['Brand', 'SKU_Count'] and pd.api.types.is_numeric_dtype(type(top_brand[col])):
-                        qty_value = top_brand[col]
-                        break
-    
-            # Hitung share
-            if total_qty > 0 and qty_value > 0:
-                brand_share = (qty_value / total_qty * 100)
-                insights.append(f"**🏆 Top Brand:** {top_brand['Brand']} ({qty_value:,.0f} units, {brand_share:.1f}%)")
-            else:
-                insights.append(f"**🏆 Top Brand:** {top_brand['Brand']} ({qty_value:,.0f} units)")
-        
-        # Display insights
-        for insight in insights:
-            st.info(insight)
+        # Calculate Brand Share based on Qty
+        if 'Brand' in df_ecomm_forecast.columns:
+             # Gunakan total volume dari loop brand section sebelumnya
+             if total_qty > 0:
+                 top_brand_name = df_ecomm_forecast.groupby('Brand')[ecomm_forecast_month_cols].sum().sum(axis=1).idxmax()
+                 top_brand_qty = df_ecomm_forecast.groupby('Brand')[ecomm_forecast_month_cols].sum().sum(axis=1).max()
+                 share = (top_brand_qty/total_qty*100)
+                 insights.append(f"**🏆 Top Brand:** {top_brand_name} ({format_number(top_brand_qty)} units, {share:.1f}%)")
+
+        for insight in insights: st.info(insight)
     
     else:
         st.error("❌ No Ecommerce forecast data available")
