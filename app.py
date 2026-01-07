@@ -4573,475 +4573,328 @@ with tab8:
 
 # --- TAB 9: RESELLER FORECAST ANALYSIS ---
 with tab9:
-    st.subheader("🤝 Reseller Channel Analysis")
-    st.markdown("**Sales History & Forecast Analysis for Reseller Channel**")
+    st.subheader("🤝 Reseller Channel Analysis (2025 vs 2026)")
+    st.markdown("**Analyze Reseller forecast data: Base Year (2025) vs Forecast Year (2026)**")
     
+    # ================ 1. DATA PREPARATION ================
     if not df_reseller_forecast.empty:
-        # ================ SECTION 1: OVERVIEW ================
-        st.divider()
-        st.subheader("📊 Reseller Channel Overview")
-        
-        # Calculate totals
-        total_historical_qty = df_reseller_forecast[reseller_historical_cols].sum().sum() if reseller_historical_cols else 0
-        total_forecast_qty = df_reseller_forecast[reseller_forecast_cols].sum().sum() if reseller_forecast_cols else 0
-        
-        # Calculate value if price available
-        total_historical_value = 0
-        total_forecast_value = 0
-        
-        df_with_price = add_product_info_to_data(df_reseller_forecast, df_product)
-        if 'Floor_Price' in df_with_price.columns:
-            # Historical value
-            for month in reseller_historical_cols:
-                total_historical_value += (df_with_price[month] * df_with_price['Floor_Price'].fillna(0)).sum()
-            
-            # Forecast value
-            for month in reseller_forecast_cols:
-                total_forecast_value += (df_with_price[month] * df_with_price['Floor_Price'].fillna(0)).sum()
-        
-        # Display KPIs
-        col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
-        
-        with col_kpi1:
-            st.metric("Total SKUs", f"{len(df_reseller_forecast):,}")
-        
-        with col_kpi2:
-            st.metric("Historical Sales Qty", f"{total_historical_qty:,.0f}")
-        
-        with col_kpi3:
-            st.metric("2026 Forecast Qty", f"{total_forecast_qty:,.0f}")
-        
-        with col_kpi4:
-            growth_pct = ((total_forecast_qty - total_historical_qty) / total_historical_qty * 100) if total_historical_qty > 0 else 0
-            st.metric("Forecast Growth", f"{growth_pct:+.1f}%")
-        
-        # ================ SECTION 2: CONNECTED TREND ================
-        st.divider()
-        st.subheader("📈 Historical Sales vs 2026 Forecast")
-        
-        # Prepare data for chart
-        monthly_data = []
-        
-        # Add historical data
-        if reseller_historical_cols:
-            for month in reseller_historical_cols:
-                month_qty = df_reseller_forecast[month].sum()
-                monthly_data.append({
-                    'Period': 'Historical',
-                    'Month': month,
-                    'Quantity': month_qty,
-                    'Month_Date': parse_month_str(month)
-                })
-        
-        # Add forecast data
-        if reseller_forecast_cols:
-            for month in reseller_forecast_cols:
-                month_qty = df_reseller_forecast[month].sum()
-                monthly_data.append({
-                    'Period': 'Forecast',
-                    'Month': month,
-                    'Quantity': month_qty,
-                    'Month_Date': parse_month_str(month)
-                })
-        
-        if monthly_data:
-            trend_df = pd.DataFrame(monthly_data)
-            trend_df = trend_df.sort_values('Month_Date')
-            trend_df['Month_Display'] = trend_df['Month']
-            
-            # Create connected chart
-            fig = go.Figure()
-            
-            # Historical line
-            hist_df = trend_df[trend_df['Period'] == 'Historical']
-            if not hist_df.empty:
-                fig.add_trace(go.Scatter(
-                    x=hist_df['Month_Display'],
-                    y=hist_df['Quantity'],
-                    name='Historical Sales',
-                    mode='lines+markers',
-                    line=dict(color='#4CAF50', width=3),
-                    marker=dict(size=6, color='#4CAF50'),
-                    hovertemplate='<b>%{x}</b><br>Sales: %{y:,.0f} units<extra></extra>'
-                ))
-            
-            # Forecast line
-            forecast_df = trend_df[trend_df['Period'] == 'Forecast']
-            if not forecast_df.empty:
-                fig.add_trace(go.Scatter(
-                    x=forecast_df['Month_Display'],
-                    y=forecast_df['Quantity'],
-                    name='2026 Forecast',
-                    mode='lines+markers',
-                    line=dict(color='#667eea', width=3, dash='dash'),
-                    marker=dict(size=8, color='#667eea'),
-                    hovertemplate='<b>%{x}</b><br>Forecast: %{y:,.0f} units<extra></extra>'
-                ))
-            
-            # Add separator line between historical and forecast
-            if not hist_df.empty and not forecast_df.empty:
-                last_hist_month = hist_df['Month_Display'].iloc[-1]
-                first_forecast_month = forecast_df['Month_Display'].iloc[0]
-                
-                # Find the gap between historical and forecast
-                fig.add_vline(
-                    x=(len(hist_df) - 0.5),
-                    line_dash="dot",
-                    line_color="gray",
-                    annotation_text="2026 Forecast Start",
-                    annotation_position="top"
-                )
-            
-            fig.update_layout(
-                height=500,
-                title='Reseller Channel: Historical Sales vs 2026 Forecast',
-                xaxis_title='Month',
-                yaxis_title='Quantity (units)',
-                hovermode='x unified',
-                plot_bgcolor='white',
-                showlegend=True
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-        
-        # ================ SECTION 3: BRAND ANALYSIS ================
-        st.divider()
-        st.subheader("🏷️ Brand Performance - Reseller Channel")
-        
-        if 'Brand' in df_reseller_forecast.columns:
-            # Calculate brand performance
-            brand_performance = []
-            
-            for brand in df_reseller_forecast['Brand'].unique():
-                brand_data = df_reseller_forecast[df_reseller_forecast['Brand'] == brand]
-                
-                # Historical sales
-                hist_sales = brand_data[reseller_historical_cols].sum().sum() if reseller_historical_cols else 0
-                
-                # Forecast
-                forecast_qty = brand_data[reseller_forecast_cols].sum().sum() if reseller_forecast_cols else 0
-                
-                # Growth
-                if hist_sales > 0:
-                    growth = ((forecast_qty - hist_sales) / hist_sales * 100)
-                else:
-                    growth = 0
-                
-                brand_performance.append({
-                    'Brand': brand,
-                    'Historical_Sales': hist_sales,
-                    '2026_Forecast': forecast_qty,
-                    'Growth_%': growth,
-                    'SKU_Count': len(brand_data)
-                })
-            
-            brand_df = pd.DataFrame(brand_performance)
-            brand_df = brand_df.sort_values('2026_Forecast', ascending=False)
-            
-            # Display charts
-            chart_col1, chart_col2 = st.columns(2)
-            
-            with chart_col1:
-                # Historical vs Forecast comparison
-                top_brands = brand_df.head(10)
-                
-                fig_comparison = go.Figure()
-                
-                fig_comparison.add_trace(go.Bar(
-                    x=top_brands['Brand'],
-                    y=top_brands['Historical_Sales'],
-                    name='Historical Sales',
-                    marker_color='#4CAF50'
-                ))
-                
-                fig_comparison.add_trace(go.Bar(
-                    x=top_brands['Brand'],
-                    y=top_brands['2026_Forecast'],
-                    name='2026 Forecast',
-                    marker_color='#667eea'
-                ))
-                
-                fig_comparison.update_layout(
-                    height=400,
-                    title='Top 10 Brands: Historical vs Forecast',
-                    xaxis_title='Brand',
-                    yaxis_title='Quantity',
-                    barmode='group',
-                    plot_bgcolor='white'
-                )
-                
-                st.plotly_chart(fig_comparison, use_container_width=True)
-            
-            with chart_col2:
-                # Growth chart
-                growth_df = brand_df[brand_df['Historical_Sales'] > 0].copy()
-                if not growth_df.empty:
-                    growth_df = growth_df.sort_values('Growth_%', ascending=False)
-                    
-                    fig_growth = go.Figure()
-                    
-                    # Color based on growth
-                    colors = ['#4CAF50' if x >= 0 else '#F44336' for x in growth_df['Growth_%'].head(10)]
-                    
-                    fig_growth.add_trace(go.Bar(
-                        x=growth_df['Brand'].head(10),
-                        y=growth_df['Growth_%'].head(10),
-                        name='Growth %',
-                        marker_color=colors,
-                        text=growth_df['Growth_%'].head(10).apply(lambda x: f"{x:+.0f}%"),
-                        textposition='auto'
-                    ))
-                    
-                    fig_growth.update_layout(
-                        height=400,
-                        title='Brand Growth Rate (Historical → 2026)',
-                        xaxis_title='Brand',
-                        yaxis_title='Growth %',
-                        plot_bgcolor='white'
-                    )
-                    
-                    st.plotly_chart(fig_growth, use_container_width=True)
-                else:
-                    st.info("No historical sales data available for growth calculation")
-            
-            # Brand summary table
-            st.markdown("#### 📋 Brand Performance Summary")
-            
-            display_brand_df = brand_df.copy()
-            display_brand_df['Historical_Sales'] = display_brand_df['Historical_Sales'].apply(lambda x: f"{x:,.0f}")
-            display_brand_df['2026_Forecast'] = display_brand_df['2026_Forecast'].apply(lambda x: f"{x:,.0f}")
-            display_brand_df['Growth_%'] = display_brand_df['Growth_%'].apply(lambda x: f"{x:+.1f}%")
-            
-            st.dataframe(
-                display_brand_df[['Brand', 'SKU_Count', 'Historical_Sales', '2026_Forecast', 'Growth_%']],
-                use_container_width=True,
-                height=300
-            )
-        
-        # ================ SECTION 4: QUARTERLY ANALYSIS ================
-        st.divider()
-        st.subheader("📅 Quarterly Analysis")
-        
-        # Group by quarter
-        def get_quarter_from_month(month_str):
-            """Get quarter from month string"""
+        # Fungsi bantu parsing bulan
+        def parse_reseller_month(month_str):
             try:
-                month_date = parse_month_str(month_str)
-                quarter = (month_date.month - 1) // 3 + 1
-                year = month_date.year
-                return f"Q{quarter} {year}"
-            except:
-                return "Unknown"
+                month_str = str(month_str).strip()
+                if '-' in month_str:
+                    parts = month_str.split('-')
+                    m_name = parts[0][:3]
+                    y_str = parts[1]
+                    # Handle 2 digit year (25 -> 2025)
+                    year = int('20' + y_str) if len(y_str) == 2 else int(y_str)
+                    return datetime.strptime(f"{m_name}-{year}", "%b-%Y")
+            except: return None
+            return None
+
+        # Identifikasi kolom bulan secara dinamis
+        all_columns = df_reseller_forecast.columns.tolist()
+        month_cols = []
         
-        # Historical quarterly
-        hist_quarterly = {}
-        if reseller_historical_cols:
-            for month in reseller_historical_cols:
-                quarter = get_quarter_from_month(month)
-                qty = df_reseller_forecast[month].sum()
-                hist_quarterly[quarter] = hist_quarterly.get(quarter, 0) + qty
+        # Cari kolom yang formatnya Mon-YY atau Mon-YYYY
+        for col in all_columns:
+            if parse_reseller_month(col):
+                month_cols.append(col)
         
-        # Forecast quarterly
-        forecast_quarterly = {}
-        if reseller_forecast_cols:
-            for month in reseller_forecast_cols:
-                quarter = get_quarter_from_month(month)
-                qty = df_reseller_forecast[month].sum()
-                forecast_quarterly[quarter] = forecast_quarterly.get(quarter, 0) + qty
+        # Sort kolom bulan secara kronologis
+        month_cols.sort(key=lambda x: parse_reseller_month(x))
         
-        # Combine data
-        quarter_data = []
-        all_quarters = sorted(set(list(hist_quarterly.keys()) + list(forecast_quarterly.keys())))
+        # Pisahkan Historical (2025) dan Forecast (2026)
+        hist_cols = [c for c in month_cols if '25' in c] # Asumsi 2025 adalah Base/Historical
+        fcst_cols = [c for c in month_cols if '26' in c] # Asumsi 2026 adalah Forecast
         
-        for quarter in all_quarters:
-            quarter_data.append({
-                'Quarter': quarter,
-                'Historical': hist_quarterly.get(quarter, 0),
-                'Forecast': forecast_quarterly.get(quarter, 0)
-            })
+        # Pastikan kolom Tier & Price ada (handle case sensitive)
+        tier_col = next((c for c in all_columns if 'tier' in c.lower()), 'SKU_Tier')
+        price_col = next((c for c in all_columns if 'price' in c.lower()), 'Floor_Price')
+        brand_col = next((c for c in all_columns if 'brand' in c.lower()), 'Brand')
         
-        if quarter_data:
-            quarter_df = pd.DataFrame(quarter_data)
-            
-            # Quarterly chart
-            fig_quarter = go.Figure()
-            
-            fig_quarter.add_trace(go.Bar(
-                x=quarter_df['Quarter'],
-                y=quarter_df['Historical'],
-                name='Historical Sales',
-                marker_color='#4CAF50'
-            ))
-            
-            fig_quarter.add_trace(go.Bar(
-                x=quarter_df['Quarter'],
-                y=quarter_df['Forecast'],
-                name='2026 Forecast',
-                marker_color='#667eea'
-            ))
-            
-            fig_quarter.update_layout(
-                height=400,
-                title='Quarterly Performance: Historical vs Forecast',
-                xaxis_title='Quarter',
-                yaxis_title='Quantity',
-                barmode='group',
-                plot_bgcolor='white'
-            )
-            
-            st.plotly_chart(fig_quarter, use_container_width=True)
-            
-            # Quarterly table
-            st.markdown("#### 📋 Quarterly Summary")
-            
-            display_quarter_df = quarter_df.copy()
-            display_quarter_df['Historical'] = display_quarter_df['Historical'].apply(lambda x: f"{x:,.0f}")
-            display_quarter_df['Forecast'] = display_quarter_df['Forecast'].apply(lambda x: f"{x:,.0f}")
-            display_quarter_df['Growth'] = ((display_quarter_df['Forecast'].str.replace(',', '').astype(float) - 
-                                          display_quarter_df['Historical'].str.replace(',', '').astype(float)) / 
-                                         display_quarter_df['Historical'].str.replace(',', '').astype(float) * 100).apply(lambda x: f"{x:+.1f}%" if pd.notnull(x) else "N/A")
-            
-            st.dataframe(
-                display_quarter_df,
-                use_container_width=True,
-                height=200
-            )
+        # ================ 2. OVERVIEW KPI ================
+        st.divider()
         
-        # ================ SECTION 5: DATA EXPLORER ================
+        # Hitung Total Qty
+        total_hist_qty = df_reseller_forecast[hist_cols].sum().sum() if hist_cols else 0
+        total_fcst_qty = df_reseller_forecast[fcst_cols].sum().sum() if fcst_cols else 0
+        
+        # Hitung Total Value (Jika price column ada)
+        total_hist_val = 0
+        total_fcst_val = 0
+        has_price = price_col in df_reseller_forecast.columns
+        
+        if has_price:
+            # Pre-calculate price filled with 0
+            prices = pd.to_numeric(df_reseller_forecast[price_col], errors='coerce').fillna(0)
+            
+            if hist_cols:
+                # Dot product manual: (Qty * Price).Sum
+                qty_25 = df_reseller_forecast[hist_cols].sum(axis=1)
+                total_hist_val = (qty_25 * prices).sum()
+                
+            if fcst_cols:
+                qty_26 = df_reseller_forecast[fcst_cols].sum(axis=1)
+                total_fcst_val = (qty_26 * prices).sum()
+
+        # Tampilkan KPI
+        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+        
+        with kpi1:
+            st.metric("Total Active SKUs", f"{len(df_reseller_forecast):,}")
+            
+        with kpi2:
+            st.metric("Total Qty 2025 (Base)", f"{total_hist_qty:,.0f}", 
+                     help="Total quantity tahun 2025")
+            if has_price: st.caption(f"Rp {total_hist_val:,.0f}")
+            
+        with kpi3:
+            growth = (total_fcst_qty - total_hist_qty) / total_hist_qty * 100 if total_hist_qty > 0 else 0
+            st.metric("Total Qty 2026 (Forecast)", f"{total_fcst_qty:,.0f}", 
+                     delta=f"{growth:+.1f}% vs 2025")
+            if has_price: st.caption(f"Rp {total_fcst_val:,.0f}")
+            
+        with kpi4:
+            # Value Growth
+            if has_price and total_hist_val > 0:
+                val_growth = (total_fcst_val - total_hist_val) / total_hist_val * 100
+                st.metric("Value Growth", f"{val_growth:+.1f}%", 
+                         delta="Revenue Growth", delta_color="normal")
+            else:
+                st.metric("Columns Identified", f"{len(month_cols)} Months", f"{len(hist_cols)} Base / {len(fcst_cols)} Fcst")
+
+        # ================ 3. DYNAMIC TREND ANALYSIS ================
+        st.divider()
+        st.subheader("📈 Trend Analysis: 2025 vs 2026")
+        
+        trend_c1, trend_c2 = st.columns([1, 3])
+        
+        with trend_c1:
+            group_by = st.selectbox("View Trend By:", ["Total", "Brand", "SKU_Tier"], index=0)
+            metric_view = st.selectbox("Metric:", ["Quantity", "Value (Rp)"], index=0) if has_price else "Quantity"
+            
+        with trend_c2:
+            # Prepare data for chart
+            chart_df = pd.DataFrame()
+            
+            # Logic data preparation
+            if group_by == "Total":
+                # Total Trend
+                monthly_sums = df_reseller_forecast[month_cols].sum()
+                if metric_view == "Value (Rp)":
+                    # Recalculate for value
+                    val_sums = []
+                    for m in month_cols:
+                        val = (df_reseller_forecast[m] * prices).sum()
+                        val_sums.append(val)
+                    chart_df = pd.DataFrame({'Month': month_cols, 'Value': val_sums, 'Group': 'Total'})
+                else:
+                    chart_df = pd.DataFrame({'Month': monthly_sums.index, 'Value': monthly_sums.values, 'Group': 'Total'})
+                    
+            else:
+                # Grouped Trend (Brand or Tier)
+                target_col = brand_col if group_by == "Brand" else tier_col
+                
+                if target_col in df_reseller_forecast.columns:
+                    # Get top 10 groups to avoid clutter
+                    top_groups = df_reseller_forecast.groupby(target_col)[month_cols].sum().sum(axis=1).nlargest(10).index.tolist()
+                    
+                    chart_data = []
+                    for group in top_groups:
+                        group_data = df_reseller_forecast[df_reseller_forecast[target_col] == group]
+                        
+                        if metric_view == "Value (Rp)":
+                            group_prices = pd.to_numeric(group_data[price_col], errors='coerce').fillna(0)
+                            for m in month_cols:
+                                val = (group_data[m] * group_prices).sum()
+                                chart_data.append({'Month': m, 'Value': val, 'Group': group})
+                        else:
+                            grp_sums = group_data[month_cols].sum()
+                            for m, val in grp_sums.items():
+                                chart_data.append({'Month': m, 'Value': val, 'Group': group})
+                                
+                    chart_df = pd.DataFrame(chart_data)
+            
+            # Plot Chart
+            if not chart_df.empty:
+                fig_trend = px.line(chart_df, x='Month', y='Value', color='Group', 
+                                  markers=True, title=f"Monthly {metric_view} Trend by {group_by}")
+                
+                # Add separator line 2025/2026
+                if hist_cols and fcst_cols:
+                    fig_trend.add_vline(x=len(hist_cols)-0.5, line_dash="dash", line_color="gray", annotation_text="Start 2026")
+                
+                fig_trend.update_layout(height=450, hovermode="x unified")
+                st.plotly_chart(fig_trend, use_container_width=True)
+
+        # ================ 4. PERFORMANCE BREAKDOWN (BRAND & TIER) ================
+        st.divider()
+        st.subheader("📊 Performance Breakdown")
+        
+        p_tab1, p_tab2 = st.tabs(["🏷️ Brand Analysis", "📦 SKU Tier Analysis"])
+        
+        # --- TAB: BRAND ANALYSIS ---
+        with p_tab1:
+            if brand_col in df_reseller_forecast.columns:
+                brand_agg = df_reseller_forecast.groupby(brand_col).agg({
+                    c: 'sum' for c in (hist_cols + fcst_cols)
+                })
+                
+                # Hitung Qty 2025 vs 2026
+                brand_summary = pd.DataFrame()
+                brand_summary['Qty_2025'] = brand_agg[hist_cols].sum(axis=1)
+                brand_summary['Qty_2026'] = brand_agg[fcst_cols].sum(axis=1)
+                brand_summary['Growth_%'] = (brand_summary['Qty_2026'] - brand_summary['Qty_2025']) / brand_summary['Qty_2025'] * 100
+                
+                # Calculate Value if possible
+                if has_price:
+                    # Agregasi value agak tricky karena harus kalikan price per baris dulu
+                    # Kita pakai helper dataframe
+                    df_val = df_reseller_forecast.copy()
+                    for c in (hist_cols + fcst_cols):
+                        df_val[c] = df_val[c] * prices
+                    
+                    val_agg = df_val.groupby(brand_col)[[c for c in (hist_cols + fcst_cols)]].sum()
+                    brand_summary['Val_2025'] = val_agg[hist_cols].sum(axis=1)
+                    brand_summary['Val_2026'] = val_agg[fcst_cols].sum(axis=1)
+                
+                brand_summary = brand_summary.sort_values('Qty_2026', ascending=False).reset_index()
+                
+                # Charts
+                b_c1, b_c2 = st.columns(2)
+                with b_c1:
+                    # Bar Chart Comparison
+                    fig_b = go.Figure()
+                    fig_b.add_trace(go.Bar(x=brand_summary[brand_col].head(10), y=brand_summary['Qty_2025'].head(10), name='2025', marker_color='#BDBDBD'))
+                    fig_b.add_trace(go.Bar(x=brand_summary[brand_col].head(10), y=brand_summary['Qty_2026'].head(10), name='2026', marker_color='#667eea'))
+                    fig_b.update_layout(title="Top 10 Brands: Qty 2025 vs 2026", barmode='group', height=400)
+                    st.plotly_chart(fig_b, use_container_width=True)
+                    
+                with b_c2:
+                    # Growth Chart
+                    df_growth = brand_summary.head(10).sort_values('Growth_%', ascending=True)
+                    fig_g = px.bar(df_growth, x='Growth_%', y=brand_col, orientation='h', 
+                                 title="Top 10 Brands Growth %", color='Growth_%', color_continuous_scale='RdYlGn')
+                    st.plotly_chart(fig_g, use_container_width=True)
+                
+                # Table
+                st.dataframe(brand_summary, use_container_width=True, 
+                             column_config={"Growth_%": st.column_config.NumberColumn(format="%.1f%%")})
+
+        # --- TAB: TIER ANALYSIS (NEW REQUEST) ---
+        with p_tab2:
+            if tier_col in df_reseller_forecast.columns:
+                # 1. Agregasi Data per Tier
+                tier_agg_qty = df_reseller_forecast.groupby(tier_col)[hist_cols + fcst_cols].sum()
+                
+                tier_summary = pd.DataFrame()
+                tier_summary['Qty_2025'] = tier_agg_qty[hist_cols].sum(axis=1)
+                tier_summary['Qty_2026'] = tier_agg_qty[fcst_cols].sum(axis=1)
+                tier_summary['Abs_Growth'] = tier_summary['Qty_2026'] - tier_summary['Qty_2025']
+                tier_summary['Growth_%'] = (tier_summary['Abs_Growth'] / tier_summary['Qty_2025']) * 100
+                
+                # Value calculation per Tier
+                if has_price:
+                    df_val_tier = df_reseller_forecast.copy()
+                    for c in (hist_cols + fcst_cols):
+                        df_val_tier[c] = df_val_tier[c] * prices
+                    
+                    val_agg_tier = df_val_tier.groupby(tier_col)[[c for c in (hist_cols + fcst_cols)]].sum()
+                    tier_summary['Val_2025'] = val_agg_tier[hist_cols].sum(axis=1)
+                    tier_summary['Val_2026'] = val_agg_tier[fcst_cols].sum(axis=1)
+                    tier_summary['Val_Growth_%'] = (tier_summary['Val_2026'] - tier_summary['Val_2025']) / tier_summary['Val_2025'] * 100
+
+                tier_summary = tier_summary.sort_values('Qty_2026', ascending=False).reset_index()
+
+                # 2. Visualization
+                t_c1, t_c2 = st.columns(2)
+                
+                with t_c1:
+                    # Comparison Chart
+                    fig_tier = go.Figure()
+                    fig_tier.add_trace(go.Bar(x=tier_summary[tier_col], y=tier_summary['Qty_2025'], name='2025', marker_color='#BDBDBD'))
+                    fig_tier.add_trace(go.Bar(x=tier_summary[tier_col], y=tier_summary['Qty_2026'], name='2026', marker_color='#FF9800'))
+                    fig_tier.update_layout(title="Tier Performance: 2025 vs 2026 (Quantity)", barmode='group', height=400)
+                    st.plotly_chart(fig_tier, use_container_width=True)
+                
+                with t_c2:
+                    # Contribution Pie Chart (2026 Forecast)
+                    fig_pie_t = px.pie(tier_summary, values='Qty_2026', names=tier_col, 
+                                     title='2026 Forecast Quantity Contribution by Tier',
+                                     color_discrete_sequence=px.colors.qualitative.Prism)
+                    st.plotly_chart(fig_pie_t, use_container_width=True)
+
+                # 3. Value Analysis (Optional)
+                if has_price:
+                    st.markdown("##### 💰 Value Performance by Tier")
+                    v_c1, v_c2 = st.columns(2)
+                    with v_c1:
+                        fig_val_t = go.Figure()
+                        fig_val_t.add_trace(go.Bar(x=tier_summary[tier_col], y=tier_summary['Val_2025'], name='Val 2025', marker_color='#90A4AE'))
+                        fig_val_t.add_trace(go.Bar(x=tier_summary[tier_col], y=tier_summary['Val_2026'], name='Val 2026', marker_color='#4CAF50'))
+                        fig_val_t.update_layout(title="Tier Value: 2025 vs 2026 (Rupiah)", barmode='group', height=350)
+                        st.plotly_chart(fig_val_t, use_container_width=True)
+                    
+                    with v_c2:
+                        # Growth Chart
+                        fig_g_t = px.bar(tier_summary, x=tier_col, y='Val_Growth_%', color='Val_Growth_%',
+                                       title="Value Growth % by Tier", color_continuous_scale='RdYlGn', text_auto='.1f')
+                        st.plotly_chart(fig_g_t, use_container_width=True)
+
+                # 4. Table Detail
+                st.markdown("##### 📋 Tier Summary Table")
+                
+                # Format Table
+                disp_tier = tier_summary.copy()
+                cols_to_fmt = ['Qty_2025', 'Qty_2026', 'Abs_Growth']
+                for c in cols_to_fmt: disp_tier[c] = disp_tier[c].apply(lambda x: f"{x:,.0f}")
+                
+                if has_price:
+                    val_cols = ['Val_2025', 'Val_2026']
+                    for c in val_cols: disp_tier[c] = disp_tier[c].apply(lambda x: f"Rp {x:,.0f}")
+                    disp_tier['Val_Growth_%'] = disp_tier['Val_Growth_%'].apply(lambda x: f"{x:+.1f}%")
+
+                disp_tier['Growth_%'] = disp_tier['Growth_%'].apply(lambda x: f"{x:+.1f}%")
+                
+                st.dataframe(disp_tier, use_container_width=True)
+            else:
+                st.warning("⚠️ SKU_Tier column not found in dataset")
+
+        # ================ 5. DATA EXPLORER ================
         st.divider()
         st.subheader("📋 Reseller Data Explorer")
         
-        # Explorer controls
-        exp_col1, exp_col2 = st.columns(2)
-        
-        with exp_col1:
-            reseller_brands = df_reseller_forecast['Brand'].unique().tolist() if 'Brand' in df_reseller_forecast.columns else []
-            selected_reseller_brands = st.multiselect(
-                "Filter Brands",
-                options=reseller_brands,
-                default=[],
-                key="reseller_brand_filter"
-            )
-        
-        with exp_col2:
-            show_data_type = st.selectbox(
-                "Show Data",
-                options=["Historical Sales", "2026 Forecast", "Both"],
-                index=2
-            )
-        
-        # Filter data
-        explorer_data = df_reseller_forecast.copy()
-        
-        if selected_reseller_brands and 'Brand' in explorer_data.columns:
-            explorer_data = explorer_data[explorer_data['Brand'].isin(selected_reseller_brands)]
-        
-        # Select columns based on data type
-        if show_data_type == "Historical Sales":
-            month_cols = reseller_historical_cols
-        elif show_data_type == "2026 Forecast":
-            month_cols = reseller_forecast_cols
-        else:  # Both
-            month_cols = reseller_historical_cols + reseller_forecast_cols
-        
-        # Select display columns
-        base_cols = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier', 'SKU_Fokus_Notes'] if 'SKU_Fokus_Notes' in explorer_data.columns else ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier']
-        display_cols = base_cols + month_cols[:6]  # Show first 6 months
-        
-        # Filter available columns
-        available_cols = [col for col in display_cols if col in explorer_data.columns]
-        display_df = explorer_data[available_cols].head(20)
-        
-        # Format numbers
-        for col in month_cols[:6]:
-            if col in display_df.columns:
-                display_df[col] = display_df[col].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) else "0")
-        
-        st.dataframe(
-            display_df,
-            use_container_width=True,
-            height=400
-        )
-        
-        # Download button
-        csv = explorer_data.to_csv(index=False)
-        st.download_button(
-            label="📥 Download Reseller Data",
-            data=csv,
-            file_name=f"reseller_data_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-        
-        # ================ SECTION 6: INSIGHTS ================
-        st.divider()
-        st.subheader("💡 Channel Insights")
-        
-        insights = []
-        
-        # Insight 1: Total comparison
-        insights.append(f"**📊 Total Volume:** Historical Sales (2024-2025): {total_historical_qty:,.0f} units → 2026 Forecast: {total_forecast_qty:,.0f} units")
-        
-        # Insight 2: Growth rate
-        if total_historical_qty > 0:
-            overall_growth = ((total_forecast_qty - total_historical_qty) / total_historical_qty * 100)
-            growth_color = "📈" if overall_growth > 0 else "📉"
-            insights.append(f"**{growth_color} Overall Growth:** {overall_growth:+.1f}% from historical to 2026 forecast")
-        else:
-            insights.append("**📊 Historical Data:** No historical sales data available for comparison")
-        
-        # Insight 3: Top brand
-        if 'brand_df' in locals() and not brand_df.empty and 'Brand' in brand_df.columns:
-            top_brand = brand_df.iloc[0]
-            brand_name = top_brand['Brand']
-            forecast_qty = top_brand['2026_Forecast']
+        # Add SKU_Focus_Notes to display if exists
+        cols_to_show = [brand_col, 'SKU_ID', 'Product_Name', tier_col]
+        if 'SKU_Focus_Notes' in df_reseller_forecast.columns:
+            cols_to_show.append('SKU_Focus_Notes')
+        if has_price:
+            cols_to_show.append(price_col)
             
-            # Calculate brand share
-            if total_forecast_qty > 0:
-                brand_share = (forecast_qty / total_forecast_qty * 100)
-                insights.append(f"**🏆 Top Brand:** {brand_name} forecasts {forecast_qty:,.0f} units ({brand_share:.1f}% of total forecast)")
-            else:
-                insights.append(f"**🏆 Top Brand:** {brand_name} forecasts {forecast_qty:,.0f} units")
+        # Add month columns (Top 6 months forecast)
+        preview_months = fcst_cols[:6] if fcst_cols else month_cols[:6]
+        cols_to_show.extend(preview_months)
         
-        # Insight 4: Forecast coverage
-        if reseller_forecast_cols:
-            forecast_months = len(reseller_forecast_cols)
-            insights.append(f"**📅 Forecast Period:** {forecast_months} months (Jan-Dec 2026)")
+        # Filter logic
+        exp_c1, exp_c2 = st.columns(2)
+        with exp_c1:
+            sel_brand = st.multiselect("Filter Brand", df_reseller_forecast[brand_col].unique())
+        with exp_c2:
+            sel_tier = st.multiselect("Filter Tier", df_reseller_forecast[tier_col].unique() if tier_col in df_reseller_forecast.columns else [])
+            
+        df_exp = df_reseller_forecast.copy()
+        if sel_brand: df_exp = df_exp[df_exp[brand_col].isin(sel_brand)]
+        if sel_tier and tier_col in df_exp.columns: df_exp = df_exp[df_exp[tier_col].isin(sel_tier)]
         
-        # Insight 5: Historical period
-        if reseller_historical_cols:
-            historical_months = len(reseller_historical_cols)
-            insights.append(f"**📊 Historical Period:** {historical_months} months (Jan 2024 - Dec 2025)")
+        st.dataframe(df_exp[cols_to_show].head(100), use_container_width=True)
         
-        # Display insights
-        for insight in insights:
-            st.info(insight)
-        
-        # Recommendations
-        st.markdown("#### 🚀 Channel Strategy Recommendations")
-        
-        rec_col1, rec_col2 = st.columns(2)
-        
-        with rec_col1:
-            st.markdown("""
-            **📈 Growth Opportunities:**
-            1. **Focus on high-growth brands** identified in analysis
-            2. **Develop promotional calendar** for peak forecast months
-            3. **Build inventory buffers** for forecasted demand spikes
-            4. **Strengthen partnerships** with top-performing resellers
-            """)
-        
-        with rec_col2:
-            st.markdown("""
-            **🤝 Relationship Management:**
-            1. **Share forecast insights** with key reseller partners
-            2. **Align production planning** with reseller demand patterns
-            3. **Create incentive programs** for forecast accuracy
-            4. **Regular performance reviews** with reseller accounts
-            """)
-    
+        # Download
+        csv = df_exp.to_csv(index=False)
+        st.download_button("📥 Download Reseller Forecast Data", csv, "reseller_forecast.csv", "text/csv")
+
     else:
-        st.warning("⚠️ No Reseller forecast data available. Please check if 'Forecast_2026_Reseller' sheet exists.")
+        st.error("❌ Reseller Forecast data is empty or could not be loaded.")
 
 # --- FOOTER ---
 st.divider()
