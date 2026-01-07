@@ -4080,9 +4080,9 @@ with tab7:
             avg_monthly = total_qty / len(ecomm_forecast_month_cols) if ecomm_forecast_month_cols else 0
             st.metric("Avg Monthly Qty", f"{format_number(avg_monthly)}")
         
-        # ================ SECTION 2: MONTHLY TREND ================
+        # ================ SECTION 2: MONTHLY TREND (MODIFIED) ================
         st.divider()
-        st.subheader("📊 Monthly Forecast Trend")
+        st.subheader("📊 Monthly Forecast Trend by Brand")
         
         # Filter controls
         trend_col1, trend_col2, trend_col3 = st.columns(3)
@@ -4090,11 +4090,18 @@ with tab7:
         with trend_col1:
             # Brand filter
             all_brands = df_ecomm_forecast['Brand'].unique().tolist() if 'Brand' in df_ecomm_forecast.columns else []
+            # Default select top 5 brands by volume to avoid messy chart initially
+            if all_brands:
+                top_5_brands = df_ecomm_forecast.groupby('Brand')[ecomm_forecast_month_cols].sum().sum(axis=1).nlargest(5).index.tolist()
+                default_brands = top_5_brands
+            else:
+                default_brands = []
+
             selected_brands = st.multiselect(
                 "Filter by Brand",
                 options=all_brands,
-                default=all_brands[:min(5, len(all_brands))] if all_brands else [],
-                help="Select brands to analyze",
+                default=default_brands,
+                help="Select brands to compare in the chart",
                 key="ecomm_brand_filter"
             )
         
@@ -4110,9 +4117,9 @@ with tab7:
         
         with trend_col3:
             # Value toggle
-            show_value = st.checkbox("Show Value Projection", value=True)
+            show_value = st.checkbox("Show Total Value Projection", value=True)
         
-        # Filter data
+        # Filter data based on selection
         filtered_ecomm = df_ecomm_forecast.copy()
         if selected_brands and 'Brand' in filtered_ecomm.columns:
             filtered_ecomm = filtered_ecomm[filtered_ecomm['Brand'].isin(selected_brands)]
@@ -4120,56 +4127,72 @@ with tab7:
         # Get months to display
         display_month_cols = ecomm_forecast_month_cols[-display_months:] if display_months < len(ecomm_forecast_month_cols) else ecomm_forecast_month_cols
         
-        # Calculate monthly totals
-        monthly_totals = filtered_ecomm[display_month_cols].sum()
-        monthly_df = pd.DataFrame({
-            'Month': monthly_totals.index,
-            'Quantity': monthly_totals.values
-        })
-        
-        # Sort by month
-        monthly_df['Month_Date'] = monthly_df['Month'].apply(parse_month_str)
-        monthly_df = monthly_df.sort_values('Month_Date')
-        monthly_df['Month_Display'] = monthly_df['Month']
-        
-        # Calculate value if needed
-        if show_value:
-            monthly_value_df = calculate_monthly_value(filtered_ecomm, display_month_cols, df_product)
-            if not monthly_value_df.empty:
-                monthly_df = pd.merge(monthly_df, monthly_value_df[['Month', 'Value']], on='Month', how='left')
-        
+        # Sort month columns properly using the helper function
+        sorted_month_cols = sorted(display_month_cols, key=parse_month_str)
+
         # Create chart
         fig = go.Figure()
-        
-        # Add quantity bars
-        fig.add_trace(go.Bar(
-            x=monthly_df['Month_Display'],
-            y=monthly_df['Quantity'],
-            name='Forecast Qty',
-            marker_color='#667eea',
-            hovertemplate='<b>%{x}</b><br>Qty: %{y:,.0f} units<extra></extra>'
-        ))
-        
-        # Add value line if available
-        if show_value and 'Value' in monthly_df.columns and monthly_df['Value'].sum() > 0:
-            fig.add_trace(go.Scatter(
-                x=monthly_df['Month_Display'],
-                y=monthly_df['Value'],
-                name='Value (Rp )',
-                mode='lines+markers',
-                line=dict(color='#FF9800', width=3),
-                marker=dict(size=8, color='#FF9800'),
-                hovertemplate='<b>%{x}</b><br>Value: Rp %{y:,.0f}<extra></extra>',
-                yaxis='y2'
+
+        # 1. ADD BARS FOR EACH BRAND
+        if 'Brand' in filtered_ecomm.columns and not filtered_ecomm.empty:
+            # Get unique brands in the filtered data
+            brands_to_plot = filtered_ecomm['Brand'].unique()
+            
+            # Sort brands by total volume so the stacking order is consistent (Largest at bottom usually looks best)
+            brand_volumes = filtered_ecomm.groupby('Brand')[sorted_month_cols].sum().sum(axis=1).sort_values(ascending=False)
+            
+            for brand in brand_volumes.index:
+                brand_data = filtered_ecomm[filtered_ecomm['Brand'] == brand]
+                # Sum qty per month for this brand
+                brand_monthly_qty = brand_data[sorted_month_cols].sum()
+                
+                fig.add_trace(go.Bar(
+                    x=brand_monthly_qty.index,
+                    y=brand_monthly_qty.values,
+                    name=brand,
+                    # Color will be assigned automatically by Plotly
+                    hovertemplate=f'<b>%{{x}}</b><br>{brand}: %{{y:,.0f}} units<extra></extra>'
+                ))
+        else:
+            # Fallback if no brands selected or no Brand column
+            total_qty = filtered_ecomm[sorted_month_cols].sum()
+            fig.add_trace(go.Bar(
+                x=total_qty.index,
+                y=total_qty.values,
+                name='Total Qty',
+                marker_color='#667eea',
+                hovertemplate='<b>%{x}</b><br>Total: %{y:,.0f} units<extra></extra>'
             ))
+        
+        # 2. ADD TOTAL VALUE LINE (Secondary Axis)
+        if show_value:
+            # Calculate total value for ALL selected brands combined
+            monthly_value_df = calculate_monthly_value(filtered_ecomm, sorted_month_cols, df_product)
+            
+            if not monthly_value_df.empty:
+                # Ensure monthly_value_df is sorted same as the chart x-axis
+                monthly_value_df['Month_Date'] = monthly_value_df['Month'].apply(parse_month_str)
+                monthly_value_df = monthly_value_df.set_index('Month').reindex(sorted_month_cols).reset_index()
+                
+                fig.add_trace(go.Scatter(
+                    x=monthly_value_df['Month'],
+                    y=monthly_value_df['Value'],
+                    name='Total Value (Rp)',
+                    mode='lines+markers',
+                    line=dict(color='#333333', width=3, dash='dot'), # Dark grey dashed line to stand out
+                    marker=dict(size=6, color='#333333', symbol='diamond'),
+                    hovertemplate='<b>%{x}</b><br>Total Value: Rp %{y:,.0f}<extra></extra>',
+                    yaxis='y2'
+                ))
         
         # Update layout
         layout_config = {
-            'height': 500,
-            'title': f'Ecommerce Forecast Trend ({len(selected_brands)} brands)',
+            'height': 550,
+            'title': f'Monthly Forecast Trend (Stacked by Brand)',
             'xaxis_title': 'Month',
             'yaxis_title': 'Quantity (units)',
-            'hovermode': 'x unified',
+            'barmode': 'stack',  # INI KUNCINYA: Menumpuk baris
+            'hovermode': 'x unified', # Memudahkan perbandingan saat hover
             'plot_bgcolor': 'white',
             'showlegend': True,
             'legend': dict(
@@ -4182,11 +4205,12 @@ with tab7:
         }
         
         # Add secondary axis if showing value
-        if show_value and 'Value' in monthly_df.columns and monthly_df['Value'].sum() > 0:
+        if show_value:
             layout_config['yaxis2'] = {
-                'title': 'Value (Rp )',
+                'title': 'Total Value (Rp)',
                 'overlaying': 'y',
-                'side': 'right'
+                'side': 'right',
+                'showgrid': False
             }
         
         fig.update_layout(**layout_config)
