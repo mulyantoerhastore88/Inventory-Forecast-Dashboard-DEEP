@@ -4212,7 +4212,19 @@ with tab7:
                 'side': 'right',
                 'showgrid': False
             }
-        
+            # ========================================================
+        # FIX: Re-calculate monthly_df untuk mencegah Error di Section Insights
+        # ========================================================
+        monthly_totals = filtered_ecomm[sorted_month_cols].sum()
+        monthly_df = pd.DataFrame({
+            'Month': monthly_totals.index,
+            'Quantity': monthly_totals.values
+        })
+        # Kita perlu kolom Month_Display karena dipakai di logic Insight di bawah
+        monthly_df['Month_Display'] = monthly_df['Month'] 
+        # ========================================================
+
+    
         fig.update_layout(**layout_config)
         st.plotly_chart(fig, use_container_width=True)
         
