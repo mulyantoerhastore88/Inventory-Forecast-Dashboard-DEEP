@@ -4573,328 +4573,337 @@ with tab8:
 
 # --- TAB 9: RESELLER FORECAST ANALYSIS ---
 with tab9:
-    st.subheader("🤝 Reseller Channel Analysis (2025 vs 2026)")
-    st.markdown("**Analyze Reseller forecast data: Base Year (2025) vs Forecast Year (2026)**")
+    st.subheader("🤝 Reseller Forecast Analysis 2026")
+    st.markdown("**Analyze Reseller forecast data (2026 Projection with 2025 History)**")
     
+    # ================ FUNGSI BANTU LOKAL (Sama dengan Tab 7) ================
+    def parse_reseller_month(month_str):
+        """Parse bulan dari string format Jan-25 atau Jan-26"""
+        try:
+            month_str = str(month_str).strip()
+            if '-' in month_str:
+                parts = month_str.split('-')
+                m_name = parts[0][:3]
+                y_str = parts[1]
+                # Handle 2 digit year (25 -> 2025)
+                year = int('20' + y_str) if len(y_str) == 2 else int(y_str)
+                return datetime.strptime(f"{m_name}-{year}", "%b-%Y")
+        except: return None
+        return None
+
     # ================ 1. DATA PREPARATION ================
     if not df_reseller_forecast.empty:
-        # Fungsi bantu parsing bulan
-        def parse_reseller_month(month_str):
-            try:
-                month_str = str(month_str).strip()
-                if '-' in month_str:
-                    parts = month_str.split('-')
-                    m_name = parts[0][:3]
-                    y_str = parts[1]
-                    # Handle 2 digit year (25 -> 2025)
-                    year = int('20' + y_str) if len(y_str) == 2 else int(y_str)
-                    return datetime.strptime(f"{m_name}-{year}", "%b-%Y")
-            except: return None
-            return None
-
+        
         # Identifikasi kolom bulan secara dinamis
         all_columns = df_reseller_forecast.columns.tolist()
         month_cols = []
         
-        # Cari kolom yang formatnya Mon-YY atau Mon-YYYY
         for col in all_columns:
             if parse_reseller_month(col):
                 month_cols.append(col)
         
-        # Sort kolom bulan secara kronologis
+        # Sort kolom bulan secara kronologis (Jan-25 s/d Dec-26)
         month_cols.sort(key=lambda x: parse_reseller_month(x))
         
-        # Pisahkan Historical (2025) dan Forecast (2026)
-        hist_cols = [c for c in month_cols if '25' in c] # Asumsi 2025 adalah Base/Historical
-        fcst_cols = [c for c in month_cols if '26' in c] # Asumsi 2026 adalah Forecast
+        # Pisahkan Forecast 2026 (Focus Utama) dan Historical 2025
+        fcst_cols_2026 = [c for c in month_cols if '26' in c] 
+        hist_cols_2025 = [c for c in month_cols if '25' in c]
         
-        # Pastikan kolom Tier & Price ada (handle case sensitive)
+        # Identifikasi kolom atribut
+        brand_col = next((c for c in all_columns if 'brand' in c.lower()), 'Brand')
         tier_col = next((c for c in all_columns if 'tier' in c.lower()), 'SKU_Tier')
         price_col = next((c for c in all_columns if 'price' in c.lower()), 'Floor_Price')
-        brand_col = next((c for c in all_columns if 'brand' in c.lower()), 'Brand')
         
-        # ================ 2. OVERVIEW KPI ================
-        st.divider()
+        # Hitung Total Qty & Value untuk 2026 (Forecast)
+        total_qty_2026 = df_reseller_forecast[fcst_cols_2026].sum().sum() if fcst_cols_2026 else 0
         
-        # Hitung Total Qty
-        total_hist_qty = df_reseller_forecast[hist_cols].sum().sum() if hist_cols else 0
-        total_fcst_qty = df_reseller_forecast[fcst_cols].sum().sum() if fcst_cols else 0
+        # Hitung Value (Perlu Price)
+        total_val_2026 = 0
+        df_with_price = add_product_info_to_data(df_reseller_forecast, df_product)
         
-        # Hitung Total Value (Jika price column ada)
-        total_hist_val = 0
-        total_fcst_val = 0
-        has_price = price_col in df_reseller_forecast.columns
+        # Gunakan Floor_Price dari sheet Reseller jika ada, jika tidak dari Product Master
+        target_price_col = price_col if price_col in df_reseller_forecast.columns else 'Floor_Price'
         
-        if has_price:
-            # Pre-calculate price filled with 0
-            prices = pd.to_numeric(df_reseller_forecast[price_col], errors='coerce').fillna(0)
+        # Pastikan kolom harga numerik
+        if target_price_col in df_with_price.columns:
+            df_with_price['Calc_Price'] = pd.to_numeric(df_with_price[target_price_col], errors='coerce').fillna(0)
             
-            if hist_cols:
-                # Dot product manual: (Qty * Price).Sum
-                qty_25 = df_reseller_forecast[hist_cols].sum(axis=1)
-                total_hist_val = (qty_25 * prices).sum()
-                
-            if fcst_cols:
-                qty_26 = df_reseller_forecast[fcst_cols].sum(axis=1)
-                total_fcst_val = (qty_26 * prices).sum()
+            # Hitung Total Value Forecast 2026
+            for month in fcst_cols_2026:
+                total_val_2026 += (df_with_price[month] * df_with_price['Calc_Price']).sum()
+        else:
+            df_with_price['Calc_Price'] = 0
 
-        # Tampilkan KPI
+        # ================ SECTION 1: OVERVIEW (Seragam Tab 7) ================
+        st.divider()
+        st.subheader("📈 Reseller Forecast Overview (2026)")
+        
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
         
         with kpi1:
-            st.metric("Total Active SKUs", f"{len(df_reseller_forecast):,}")
+            st.metric("Total SKUs", f"{len(df_reseller_forecast):,}")
             
         with kpi2:
-            st.metric("Total Qty 2025 (Base)", f"{total_hist_qty:,.0f}", 
-                     help="Total quantity tahun 2025")
-            if has_price: st.caption(f"Rp {total_hist_val:,.0f}")
+            st.metric("Total Forecast Qty", f"{total_qty_2026:,.0f}", help="Total Quantity Jan-Dec 2026")
             
         with kpi3:
-            growth = (total_fcst_qty - total_hist_qty) / total_hist_qty * 100 if total_hist_qty > 0 else 0
-            st.metric("Total Qty 2026 (Forecast)", f"{total_fcst_qty:,.0f}", 
-                     delta=f"{growth:+.1f}% vs 2025")
-            if has_price: st.caption(f"Rp {total_fcst_val:,.0f}")
+            st.metric("Total Forecast Value", f"Rp {total_val_2026:,.0f}", help="Total Value Jan-Dec 2026")
             
         with kpi4:
-            # Value Growth
-            if has_price and total_hist_val > 0:
-                val_growth = (total_fcst_val - total_hist_val) / total_hist_val * 100
-                st.metric("Value Growth", f"{val_growth:+.1f}%", 
-                         delta="Revenue Growth", delta_color="normal")
-            else:
-                st.metric("Columns Identified", f"{len(month_cols)} Months", f"{len(hist_cols)} Base / {len(fcst_cols)} Fcst")
+            # Growth vs 2025 (Historical)
+            total_qty_2025 = df_reseller_forecast[hist_cols_2025].sum().sum() if hist_cols_2025 else 0
+            growth = (total_qty_2026 - total_qty_2025) / total_qty_2025 * 100 if total_qty_2025 > 0 else 0
+            st.metric("Growth vs 2025", f"{growth:+.1f}%", delta="Volume Growth")
 
-        # ================ 3. DYNAMIC TREND ANALYSIS ================
+        # ================ SECTION 2: MONTHLY TREND (LINE CHART) ================
         st.divider()
-        st.subheader("📈 Trend Analysis: 2025 vs 2026")
+        st.subheader("📊 Monthly Trend Analysis (2025 - 2026)")
         
-        trend_c1, trend_c2 = st.columns([1, 3])
+        # Filter controls
+        trend_c1, trend_c2, trend_c3 = st.columns(3)
         
         with trend_c1:
-            group_by = st.selectbox("View Trend By:", ["Total", "Brand", "SKU_Tier"], index=0)
-            metric_view = st.selectbox("Metric:", ["Quantity", "Value (Rp)"], index=0) if has_price else "Quantity"
+            # Filter Brand
+            all_brands = df_reseller_forecast[brand_col].unique().tolist() if brand_col in df_reseller_forecast.columns else []
+            # Default Top 5 Brands
+            default_brands = []
+            if all_brands:
+                default_brands = df_reseller_forecast.groupby(brand_col)[fcst_cols_2026].sum().sum(axis=1).nlargest(5).index.tolist()
+                
+            sel_brands = st.multiselect("Filter by Brand", options=all_brands, default=default_brands, key="res_trend_brand")
             
         with trend_c2:
-            # Prepare data for chart
-            chart_df = pd.DataFrame()
+            # Filter Tier (Additional Feature)
+            all_tiers = df_reseller_forecast[tier_col].unique().tolist() if tier_col in df_reseller_forecast.columns else []
+            sel_tiers = st.multiselect("Filter by Tier", options=all_tiers, default=all_tiers, key="res_trend_tier")
             
-            # Logic data preparation
-            if group_by == "Total":
-                # Total Trend
-                monthly_sums = df_reseller_forecast[month_cols].sum()
-                if metric_view == "Value (Rp)":
-                    # Recalculate for value
-                    val_sums = []
-                    for m in month_cols:
-                        val = (df_reseller_forecast[m] * prices).sum()
-                        val_sums.append(val)
-                    chart_df = pd.DataFrame({'Month': month_cols, 'Value': val_sums, 'Group': 'Total'})
-                else:
-                    chart_df = pd.DataFrame({'Month': monthly_sums.index, 'Value': monthly_sums.values, 'Group': 'Total'})
-                    
-            else:
-                # Grouped Trend (Brand or Tier)
-                target_col = brand_col if group_by == "Brand" else tier_col
-                
-                if target_col in df_reseller_forecast.columns:
-                    # Get top 10 groups to avoid clutter
-                    top_groups = df_reseller_forecast.groupby(target_col)[month_cols].sum().sum(axis=1).nlargest(10).index.tolist()
-                    
-                    chart_data = []
-                    for group in top_groups:
-                        group_data = df_reseller_forecast[df_reseller_forecast[target_col] == group]
-                        
-                        if metric_view == "Value (Rp)":
-                            group_prices = pd.to_numeric(group_data[price_col], errors='coerce').fillna(0)
-                            for m in month_cols:
-                                val = (group_data[m] * group_prices).sum()
-                                chart_data.append({'Month': m, 'Value': val, 'Group': group})
-                        else:
-                            grp_sums = group_data[month_cols].sum()
-                            for m, val in grp_sums.items():
-                                chart_data.append({'Month': m, 'Value': val, 'Group': group})
-                                
-                    chart_df = pd.DataFrame(chart_data)
-            
-            # Plot Chart
-            if not chart_df.empty:
-                fig_trend = px.line(chart_df, x='Month', y='Value', color='Group', 
-                                  markers=True, title=f"Monthly {metric_view} Trend by {group_by}")
-                
-                # Add separator line 2025/2026
-                if hist_cols and fcst_cols:
-                    fig_trend.add_vline(x=len(hist_cols)-0.5, line_dash="dash", line_color="gray", annotation_text="Start 2026")
-                
-                fig_trend.update_layout(height=450, hovermode="x unified")
-                st.plotly_chart(fig_trend, use_container_width=True)
+        with trend_c3:
+            show_val_line = st.checkbox("Show Total Value (Secondary Axis)", value=True, key="res_show_val")
 
-        # ================ 4. PERFORMANCE BREAKDOWN (BRAND & TIER) ================
+        # Filter Data
+        df_trend_filtered = df_reseller_forecast.copy()
+        if sel_brands: df_trend_filtered = df_trend_filtered[df_trend_filtered[brand_col].isin(sel_brands)]
+        if sel_tiers and tier_col in df_trend_filtered.columns: df_trend_filtered = df_trend_filtered[df_trend_filtered[tier_col].isin(sel_tiers)]
+
+        # Generate Line Chart
+        fig = go.Figure()
+        
+        # 1. Add Lines per Brand (Qty)
+        # Gunakan SEMUA bulan (2025 & 2026) untuk trend line yang nyambung
+        all_month_cols = month_cols 
+        
+        if brand_col in df_trend_filtered.columns and not df_trend_filtered.empty:
+            brand_vols = df_trend_filtered.groupby(brand_col)[all_month_cols].sum().sum(axis=1).sort_values(ascending=False)
+            for brand in brand_vols.index:
+                brand_qty = df_trend_filtered[df_trend_filtered[brand_col] == brand][all_month_cols].sum()
+                fig.add_trace(go.Scatter(
+                    x=brand_qty.index, y=brand_qty.values, name=brand,
+                    mode='lines+markers', line=dict(width=3), marker=dict(size=6),
+                    hovertemplate=f'<b>%{{x}}</b><br>{brand}: %{{y:,.0f}}<extra></extra>'
+                ))
+        
+        # 2. Add Total Value Line (Secondary Axis)
+        if show_val_line:
+            # Calculate value per month for filtered data
+            monthly_vals = []
+            df_filt_price = add_product_info_to_data(df_trend_filtered, df_product)
+            df_filt_price['Calc_Price'] = pd.to_numeric(df_filt_price[target_price_col], errors='coerce').fillna(0)
+            
+            for m in all_month_cols:
+                val = (df_filt_price[m] * df_filt_price['Calc_Price']).sum()
+                monthly_vals.append(val)
+                
+            fig.add_trace(go.Scatter(
+                x=all_month_cols, y=monthly_vals, name='Total Value (Rp)',
+                mode='lines+markers', line=dict(color='#333333', width=2, dash='dot'),
+                marker=dict(size=5, color='#333333', symbol='x'), yaxis='y2', opacity=0.6,
+                hovertemplate='<b>%{x}</b><br>Total Value: Rp %{y:,.0f}<extra></extra>'
+            ))
+            
+        # Add Separator Line 2025/2026
+        if hist_cols_2025:
+             fig.add_vline(x=len(hist_cols_2025)-0.5, line_dash="dash", line_color="gray", annotation_text="Forecast 2026 Start")
+
+        # Layout
+        layout_config = {
+            'height': 500, 'title': 'Monthly Sales Trend: 2025 (History) vs 2026 (Forecast)',
+            'xaxis_title': 'Month', 'yaxis_title': 'Quantity (units)',
+            'hovermode': 'x unified', 'plot_bgcolor': 'white', 'showlegend': True,
+            'legend': dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        }
+        if show_val_line:
+            layout_config['yaxis2'] = {'title': 'Total Value (Rp)', 'overlaying': 'y', 'side': 'right', 'showgrid': False}
+            
+        fig.update_layout(**layout_config)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # ================ SECTION 3: QUARTERLY ANALYSIS (BRAND & TIER) ================
         st.divider()
-        st.subheader("📊 Performance Breakdown")
+        st.subheader("📅 Quarterly Performance 2026 (Brand & Tier)")
         
-        p_tab1, p_tab2 = st.tabs(["🏷️ Brand Analysis", "📦 SKU Tier Analysis"])
+        # Logic Quarter (Hanya untuk 2026 Forecast)
+        q_map = {'Q1-26': ['jan-26', 'feb-26', 'mar-26'], 
+                 'Q2-26': ['apr-26', 'may-26', 'jun-26'], 
+                 'Q3-26': ['jul-26', 'aug-26', 'sep-26'], 
+                 'Q4-26': ['oct-26', 'nov-26', 'dec-26']}
         
-        # --- TAB: BRAND ANALYSIS ---
-        with p_tab1:
-            if brand_col in df_reseller_forecast.columns:
-                brand_agg = df_reseller_forecast.groupby(brand_col).agg({
-                    c: 'sum' for c in (hist_cols + fcst_cols)
-                })
+        q_cols_map = {'Q1': [], 'Q2': [], 'Q3': [], 'Q4': []}
+        
+        # Mapping kolom forecast ke quarter
+        for col in fcst_cols_2026:
+            c_lower = col.lower()
+            if any(m in c_lower for m in q_map['Q1-26']): q_cols_map['Q1'].append(col)
+            elif any(m in c_lower for m in q_map['Q2-26']): q_cols_map['Q2'].append(col)
+            elif any(m in c_lower for m in q_map['Q3-26']): q_cols_map['Q3'].append(col)
+            elif any(m in c_lower for m in q_map['Q4-26']): q_cols_map['Q4'].append(col)
+            
+        active_qs = [q for q, cols in q_cols_map.items() if len(cols) > 0]
+        
+        if active_qs:
+            # TABS: Brand vs Tier
+            qt_tab1, qt_tab2 = st.tabs(["🏷️ By Brand", "📦 By SKU Tier"])
+            
+            # --- HELPER FUNCTION FOR HEATMAP ---
+            def render_heatmap_section(group_col, df_source, title_suffix):
+                # Data Preparation
+                q_data_qty = []
+                q_data_val = []
                 
-                # Hitung Qty 2025 vs 2026
-                brand_summary = pd.DataFrame()
-                brand_summary['Qty_2025'] = brand_agg[hist_cols].sum(axis=1)
-                brand_summary['Qty_2026'] = brand_agg[fcst_cols].sum(axis=1)
-                brand_summary['Growth_%'] = (brand_summary['Qty_2026'] - brand_summary['Qty_2025']) / brand_summary['Qty_2025'] * 100
+                # Pre-calc price
+                df_source['Calc_Price'] = pd.to_numeric(df_source[target_price_col], errors='coerce').fillna(0)
                 
-                # Calculate Value if possible
-                if has_price:
-                    # Agregasi value agak tricky karena harus kalikan price per baris dulu
-                    # Kita pakai helper dataframe
-                    df_val = df_reseller_forecast.copy()
-                    for c in (hist_cols + fcst_cols):
-                        df_val[c] = df_val[c] * prices
+                for group in df_source[group_col].unique():
+                    row_qty = {group_col: group}
+                    row_val = {group_col: group}
+                    grp_data = df_source[df_source[group_col] == group]
                     
-                    val_agg = df_val.groupby(brand_col)[[c for c in (hist_cols + fcst_cols)]].sum()
-                    brand_summary['Val_2025'] = val_agg[hist_cols].sum(axis=1)
-                    brand_summary['Val_2026'] = val_agg[fcst_cols].sum(axis=1)
-                
-                brand_summary = brand_summary.sort_values('Qty_2026', ascending=False).reset_index()
-                
-                # Charts
-                b_c1, b_c2 = st.columns(2)
-                with b_c1:
-                    # Bar Chart Comparison
-                    fig_b = go.Figure()
-                    fig_b.add_trace(go.Bar(x=brand_summary[brand_col].head(10), y=brand_summary['Qty_2025'].head(10), name='2025', marker_color='#BDBDBD'))
-                    fig_b.add_trace(go.Bar(x=brand_summary[brand_col].head(10), y=brand_summary['Qty_2026'].head(10), name='2026', marker_color='#667eea'))
-                    fig_b.update_layout(title="Top 10 Brands: Qty 2025 vs 2026", barmode='group', height=400)
-                    st.plotly_chart(fig_b, use_container_width=True)
+                    tot_qty = 0
+                    tot_val = 0
                     
-                with b_c2:
-                    # Growth Chart
-                    df_growth = brand_summary.head(10).sort_values('Growth_%', ascending=True)
-                    fig_g = px.bar(df_growth, x='Growth_%', y=brand_col, orientation='h', 
-                                 title="Top 10 Brands Growth %", color='Growth_%', color_continuous_scale='RdYlGn')
-                    st.plotly_chart(fig_g, use_container_width=True)
+                    for q in active_qs:
+                        cols = q_cols_map[q]
+                        # Qty
+                        q_qty = grp_data[cols].sum().sum()
+                        row_qty[q] = q_qty
+                        tot_qty += q_qty
+                        
+                        # Value
+                        q_val = 0
+                        for c in cols: q_val += (grp_data[c] * grp_data['Calc_Price']).sum()
+                        row_val[q] = q_val
+                        tot_val += q_val
+                    
+                    row_qty['Total'] = tot_qty
+                    row_val['Total'] = tot_val
+                    q_data_qty.append(row_qty)
+                    q_data_val.append(row_val)
+                
+                # Create DataFrames
+                df_qq = pd.DataFrame(q_data_qty).sort_values('Total', ascending=False)
+                df_qv = pd.DataFrame(q_data_val).sort_values('Total', ascending=False)
+                
+                # --- VISUALIZATION ---
+                c1, c2 = st.columns(2)
+                
+                with c1:
+                    st.markdown(f"**📦 Quantity Heatmap ({title_suffix})**")
+                    fig_h_q = go.Figure(data=go.Heatmap(
+                        z=df_qq[active_qs].head(10).values, x=active_qs, y=df_qq[group_col].head(10),
+                        colorscale='Blues', text=df_qq[active_qs].head(10).values, texttemplate="%{text:,.0f}"
+                    ))
+                    fig_h_q.update_layout(height=350, margin=dict(l=0, r=0, t=30, b=0))
+                    st.plotly_chart(fig_h_q, use_container_width=True)
+                    
+                with c2:
+                    st.markdown(f"**💰 Value Heatmap ({title_suffix})**")
+                    fig_h_v = go.Figure(data=go.Heatmap(
+                        z=df_qv[active_qs].head(10).values, x=active_qs, y=df_qv[group_col].head(10),
+                        colorscale='Greens', text=df_qv[active_qs].head(10).values, texttemplate="Rp %{text:,.0f}"
+                    ))
+                    fig_h_v.update_layout(height=350, margin=dict(l=0, r=0, t=30, b=0))
+                    st.plotly_chart(fig_h_v, use_container_width=True)
                 
                 # Table
-                st.dataframe(brand_summary, use_container_width=True, 
-                             column_config={"Growth_%": st.column_config.NumberColumn(format="%.1f%%")})
+                with st.expander(f"View Detailed Table ({title_suffix})"):
+                    # Combine Qty & Value for display? Or just show Qty table
+                    disp_df = df_qq.copy()
+                    for c in disp_df.columns:
+                        if c != group_col: disp_df[c] = disp_df[c].apply(lambda x: f"{x:,.0f}")
+                    st.dataframe(disp_df, use_container_width=True)
 
-        # --- TAB: TIER ANALYSIS (NEW REQUEST) ---
-        with p_tab2:
-            if tier_col in df_reseller_forecast.columns:
-                # 1. Agregasi Data per Tier
-                tier_agg_qty = df_reseller_forecast.groupby(tier_col)[hist_cols + fcst_cols].sum()
-                
-                tier_summary = pd.DataFrame()
-                tier_summary['Qty_2025'] = tier_agg_qty[hist_cols].sum(axis=1)
-                tier_summary['Qty_2026'] = tier_agg_qty[fcst_cols].sum(axis=1)
-                tier_summary['Abs_Growth'] = tier_summary['Qty_2026'] - tier_summary['Qty_2025']
-                tier_summary['Growth_%'] = (tier_summary['Abs_Growth'] / tier_summary['Qty_2025']) * 100
-                
-                # Value calculation per Tier
-                if has_price:
-                    df_val_tier = df_reseller_forecast.copy()
-                    for c in (hist_cols + fcst_cols):
-                        df_val_tier[c] = df_val_tier[c] * prices
-                    
-                    val_agg_tier = df_val_tier.groupby(tier_col)[[c for c in (hist_cols + fcst_cols)]].sum()
-                    tier_summary['Val_2025'] = val_agg_tier[hist_cols].sum(axis=1)
-                    tier_summary['Val_2026'] = val_agg_tier[fcst_cols].sum(axis=1)
-                    tier_summary['Val_Growth_%'] = (tier_summary['Val_2026'] - tier_summary['Val_2025']) / tier_summary['Val_2025'] * 100
+            # --- RENDER TABS ---
+            with qt_tab1:
+                render_heatmap_section(brand_col, df_with_price, "Brand")
+            
+            with qt_tab2:
+                if tier_col in df_with_price.columns:
+                    render_heatmap_section(tier_col, df_with_price, "Tier")
+                else:
+                    st.warning("⚠️ SKU Tier column not found")
 
-                tier_summary = tier_summary.sort_values('Qty_2026', ascending=False).reset_index()
-
-                # 2. Visualization
-                t_c1, t_c2 = st.columns(2)
-                
-                with t_c1:
-                    # Comparison Chart
-                    fig_tier = go.Figure()
-                    fig_tier.add_trace(go.Bar(x=tier_summary[tier_col], y=tier_summary['Qty_2025'], name='2025', marker_color='#BDBDBD'))
-                    fig_tier.add_trace(go.Bar(x=tier_summary[tier_col], y=tier_summary['Qty_2026'], name='2026', marker_color='#FF9800'))
-                    fig_tier.update_layout(title="Tier Performance: 2025 vs 2026 (Quantity)", barmode='group', height=400)
-                    st.plotly_chart(fig_tier, use_container_width=True)
-                
-                with t_c2:
-                    # Contribution Pie Chart (2026 Forecast)
-                    fig_pie_t = px.pie(tier_summary, values='Qty_2026', names=tier_col, 
-                                     title='2026 Forecast Quantity Contribution by Tier',
-                                     color_discrete_sequence=px.colors.qualitative.Prism)
-                    st.plotly_chart(fig_pie_t, use_container_width=True)
-
-                # 3. Value Analysis (Optional)
-                if has_price:
-                    st.markdown("##### 💰 Value Performance by Tier")
-                    v_c1, v_c2 = st.columns(2)
-                    with v_c1:
-                        fig_val_t = go.Figure()
-                        fig_val_t.add_trace(go.Bar(x=tier_summary[tier_col], y=tier_summary['Val_2025'], name='Val 2025', marker_color='#90A4AE'))
-                        fig_val_t.add_trace(go.Bar(x=tier_summary[tier_col], y=tier_summary['Val_2026'], name='Val 2026', marker_color='#4CAF50'))
-                        fig_val_t.update_layout(title="Tier Value: 2025 vs 2026 (Rupiah)", barmode='group', height=350)
-                        st.plotly_chart(fig_val_t, use_container_width=True)
-                    
-                    with v_c2:
-                        # Growth Chart
-                        fig_g_t = px.bar(tier_summary, x=tier_col, y='Val_Growth_%', color='Val_Growth_%',
-                                       title="Value Growth % by Tier", color_continuous_scale='RdYlGn', text_auto='.1f')
-                        st.plotly_chart(fig_g_t, use_container_width=True)
-
-                # 4. Table Detail
-                st.markdown("##### 📋 Tier Summary Table")
-                
-                # Format Table
-                disp_tier = tier_summary.copy()
-                cols_to_fmt = ['Qty_2025', 'Qty_2026', 'Abs_Growth']
-                for c in cols_to_fmt: disp_tier[c] = disp_tier[c].apply(lambda x: f"{x:,.0f}")
-                
-                if has_price:
-                    val_cols = ['Val_2025', 'Val_2026']
-                    for c in val_cols: disp_tier[c] = disp_tier[c].apply(lambda x: f"Rp {x:,.0f}")
-                    disp_tier['Val_Growth_%'] = disp_tier['Val_Growth_%'].apply(lambda x: f"{x:+.1f}%")
-
-                disp_tier['Growth_%'] = disp_tier['Growth_%'].apply(lambda x: f"{x:+.1f}%")
-                
-                st.dataframe(disp_tier, use_container_width=True)
-            else:
-                st.warning("⚠️ SKU_Tier column not found in dataset")
-
-        # ================ 5. DATA EXPLORER ================
+        # ================ SECTION 4: DATA EXPLORER ================
         st.divider()
         st.subheader("📋 Reseller Data Explorer")
         
-        # Add SKU_Focus_Notes to display if exists
-        cols_to_show = [brand_col, 'SKU_ID', 'Product_Name', tier_col]
-        if 'SKU_Focus_Notes' in df_reseller_forecast.columns:
-            cols_to_show.append('SKU_Focus_Notes')
-        if has_price:
-            cols_to_show.append(price_col)
+        e_c1, e_c2 = st.columns(2)
+        with e_c1:
+            exp_brands = st.multiselect("Filter Brands", options=all_brands, default=[], key="res_exp_brand")
+        with e_c2:
+            exp_show = st.selectbox("Show Period", ["Forecast 2026", "History 2025", "All Data"], index=0)
             
-        # Add month columns (Top 6 months forecast)
-        preview_months = fcst_cols[:6] if fcst_cols else month_cols[:6]
-        cols_to_show.extend(preview_months)
+        # Select Columns
+        disp_cols = [brand_col, 'SKU_ID', 'Product_Name', tier_col]
+        if 'SKU_Focus_Notes' in df_reseller_forecast.columns: disp_cols.append('SKU_Focus_Notes')
         
-        # Filter logic
-        exp_c1, exp_c2 = st.columns(2)
-        with exp_c1:
-            sel_brand = st.multiselect("Filter Brand", df_reseller_forecast[brand_col].unique())
-        with exp_c2:
-            sel_tier = st.multiselect("Filter Tier", df_reseller_forecast[tier_col].unique() if tier_col in df_reseller_forecast.columns else [])
-            
+        if exp_show == "Forecast 2026": period_cols = fcst_cols_2026
+        elif exp_show == "History 2025": period_cols = hist_cols_2025
+        else: period_cols = month_cols
+        
+        final_cols = disp_cols + period_cols
+        
+        # Filter Rows
         df_exp = df_reseller_forecast.copy()
-        if sel_brand: df_exp = df_exp[df_exp[brand_col].isin(sel_brand)]
-        if sel_tier and tier_col in df_exp.columns: df_exp = df_exp[df_exp[tier_col].isin(sel_tier)]
+        if exp_brands: df_exp = df_exp[df_exp[brand_col].isin(exp_brands)]
         
-        st.dataframe(df_exp[cols_to_show].head(100), use_container_width=True)
+        # Display
+        df_disp_exp = df_exp[final_cols].head(100).copy()
+        for c in period_cols: 
+            if c in df_disp_exp.columns: df_disp_exp[c] = df_disp_exp[c].apply(lambda x: f"{x:,.0f}")
+            
+        st.dataframe(df_disp_exp, use_container_width=True)
         
-        # Download
-        csv = df_exp.to_csv(index=False)
-        st.download_button("📥 Download Reseller Forecast Data", csv, "reseller_forecast.csv", "text/csv")
+        csv_res = df_exp.to_csv(index=False)
+        st.download_button("📥 Download Reseller CSV", csv_res, "reseller_forecast_data.csv", "text/csv")
+
+        # ================ SECTION 5: INSIGHTS ================
+        st.divider()
+        st.subheader("💡 Key Insights")
+        
+        insights = []
+        insights.append(f"**📊 Total Forecast 2026:** {total_qty_2026:,.0f} units (Rp {total_val_2026:,.0f})")
+        
+        # Top Brand & Tier Insight
+        if brand_col in df_reseller_forecast.columns:
+            top_b = df_reseller_forecast.groupby(brand_col)[fcst_cols_2026].sum().sum(axis=1).idxmax()
+            top_b_qty = df_reseller_forecast.groupby(brand_col)[fcst_cols_2026].sum().sum(axis=1).max()
+            insights.append(f"**🏆 Top Brand (2026):** {top_b} ({top_b_qty:,.0f} units)")
+            
+        if tier_col in df_reseller_forecast.columns:
+            top_t = df_reseller_forecast.groupby(tier_col)[fcst_cols_2026].sum().sum(axis=1).idxmax()
+            top_t_val = df_reseller_forecast.groupby(tier_col)[fcst_cols_2026].sum().sum(axis=1).max()
+            insights.append(f"**📦 Top Tier (2026):** {top_t} ({top_t_val:,.0f} units)")
+            
+        # Peak Month 2026
+        monthly_sum_26 = df_reseller_forecast[fcst_cols_2026].sum()
+        if not monthly_sum_26.empty:
+            peak_m = monthly_sum_26.idxmax()
+            peak_v = monthly_sum_26.max()
+            insights.append(f"**🎯 Peak Sales Month (2026):** {peak_m} ({peak_v:,.0f} units)")
+
+        for insight in insights: st.info(insight)
 
     else:
-        st.error("❌ Reseller Forecast data is empty or could not be loaded.")
+        st.error("❌ No Reseller forecast data available")
 
 # --- FOOTER ---
 st.divider()
