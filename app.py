@@ -2175,18 +2175,22 @@ with tab2:
             col1, col2 = st.columns(2)
             
             with col1:
+                # --- UPDATE: Format angka jadi String biar ada komanya (Rp 1,000,000) ---
+                brand_disp = brand_financial.head(10).copy()
+                brand_disp['Revenue'] = brand_disp['Revenue'].apply(lambda x: f"Rp {x:,.0f}")
+                brand_disp['Gross_Margin'] = brand_disp['Gross_Margin'].apply(lambda x: f"Rp {x:,.0f}")
+                
                 st.dataframe(
-                    brand_financial.head(10),
+                    brand_disp,
                     column_config={
-                        "Revenue": st.column_config.NumberColumn("Revenue", format="Rp  %.0f"),
-                        "Gross_Margin": st.column_config.NumberColumn("Gross Margin", format="Rp  %.0f"),
+                        # Revenue & Gross Margin gak perlu config lagi karena sudah jadi Text di atas
                         "Margin_Percentage": st.column_config.ProgressColumn("Margin %", format="%.1f%%", min_value=0, max_value=100)
                     },
                     use_container_width=True
                 )
             
             with col2:
-                # Chart brand profitability
+                # Chart brand profitability (Tidak berubah)
                 fig = px.bar(brand_financial.head(10), x='Brand', y='Margin_Percentage',
                             title='Top 10 Brands by Margin %',
                             color='Margin_Percentage',
