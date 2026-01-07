@@ -4317,258 +4317,267 @@ with tab7:
 
 # --- TAB 8: PROFITABILITY ANALYSIS ---
 with tab8:
-    st.subheader("💰 Profitability & Financial Analysis")
+    st.subheader("💰 Combined Profitability & Financial Projection (2026)")
+    st.markdown("**Comprehensive Financial Outlook: Ecommerce + Reseller Channels**")
+
+    # ================ 1. DATA PROCESSING ENGINE ================
+    # Kita butuh menggabungkan data Ecomm dan Reseller menjadi satu format standar
+    # Format target: SKU_ID | Month | Channel | Qty | Floor_Price | Net_Order_Price
     
-    if not df_financial.empty:
-        # 1. QUICK METRICS
-        col1, col2, col3, col4 = st.columns(4)
+    combined_data = []
+    process_success = False
+    
+    with st.spinner('🔄 Merging Financial Data...'):
+        try:
+            # --- A. Process Ecommerce Data ---
+            if not df_ecomm_forecast.empty:
+                # Cari kolom bulan 2026
+                ecomm_cols_26 = [c for c in df_ecomm_forecast.columns if '26' in str(c) and any(m in str(c).lower() for m in ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'])]
+                
+                if ecomm_cols_26:
+                    # Melt menjadi long format
+                    df_e_long = df_ecomm_forecast.melt(
+                        id_vars=['SKU_ID'], 
+                        value_vars=ecomm_cols_26, 
+                        var_name='Month_Label', 
+                        value_name='Qty'
+                    )
+                    df_e_long['Channel'] = 'Ecommerce'
+                    combined_data.append(df_e_long)
+
+            # --- B. Process Reseller Data ---
+            if not df_reseller_forecast.empty:
+                # Cari kolom bulan 2026
+                res_cols_26 = [c for c in df_reseller_forecast.columns if '26' in str(c) and any(m in str(c).lower() for m in ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'])]
+                
+                if res_cols_26:
+                    df_r_long = df_reseller_forecast.melt(
+                        id_vars=['SKU_ID'], 
+                        value_vars=res_cols_26, 
+                        var_name='Month_Label', 
+                        value_name='Qty'
+                    )
+                    df_r_long['Channel'] = 'Reseller'
+                    combined_data.append(df_r_long)
+            
+            # --- C. Merge & Enrich ---
+            if combined_data:
+                df_fin_combined = pd.concat(combined_data, ignore_index=True)
+                
+                # Bersihkan data Qty
+                df_fin_combined['Qty'] = pd.to_numeric(df_fin_combined['Qty'], errors='coerce').fillna(0)
+                df_fin_combined = df_fin_combined[df_fin_combined['Qty'] > 0] # Ambil yang ada isinya saja
+                
+                # Standardize Month
+                def parse_fin_month(m):
+                    try:
+                        m = str(m).strip()
+                        if '-' in m:
+                            parts = m.split('-')
+                            return datetime.strptime(f"{parts[0][:3]}-20{parts[1][-2:]}", "%b-%Y")
+                    except: return None
+                
+                df_fin_combined['Month_Date'] = df_fin_combined['Month_Label'].apply(parse_fin_month)
+                df_fin_combined = df_fin_combined.sort_values('Month_Date')
+                
+                # Add Product Info (Brand, Tier, Prices)
+                # Pastikan kolom harga ada di df_product
+                cols_to_merge = ['SKU_ID', 'Product_Name', 'Brand', 'SKU_Tier']
+                if 'Floor_Price' in df_product.columns: cols_to_merge.append('Floor_Price')
+                if 'Net_Order_Price' in df_product.columns: cols_to_merge.append('Net_Order_Price') # Cost/HPP
+                
+                df_fin_combined = pd.merge(df_fin_combined, df_product[cols_to_merge], on='SKU_ID', how='left')
+                
+                # Fill missing prices with 0
+                if 'Floor_Price' in df_fin_combined.columns:
+                    df_fin_combined['Floor_Price'] = pd.to_numeric(df_fin_combined['Floor_Price'], errors='coerce').fillna(0)
+                else: df_fin_combined['Floor_Price'] = 0
+                    
+                if 'Net_Order_Price' in df_fin_combined.columns:
+                    df_fin_combined['Net_Order_Price'] = pd.to_numeric(df_fin_combined['Net_Order_Price'], errors='coerce').fillna(0)
+                else: df_fin_combined['Net_Order_Price'] = 0
+                
+                # Calculate Financials
+                df_fin_combined['Revenue'] = df_fin_combined['Qty'] * df_fin_combined['Floor_Price']
+                df_fin_combined['COGS'] = df_fin_combined['Qty'] * df_fin_combined['Net_Order_Price']
+                df_fin_combined['Gross_Margin'] = df_fin_combined['Revenue'] - df_fin_combined['COGS']
+                
+                process_success = True
+            else:
+                st.warning("⚠️ No 2026 forecast data found in Ecomm or Reseller sheets.")
+                
+        except Exception as e:
+            st.error(f"❌ Error processing financial data: {str(e)}")
+
+    # ================ 2. DASHBOARD VISUALIZATION ================
+    if process_success and not df_fin_combined.empty:
         
-        with col1:
-            total_revenue = df_financial['Revenue'].sum()
-            st.metric("Total Revenue", f"Rp {total_revenue:,.0f}")
-        
-        with col2:
-            total_margin = df_financial['Gross_Margin'].sum()
-            st.metric("Total Gross Margin", f"Rp {total_margin:,.0f}")
-        
-        with col3:
-            avg_margin_pct = (total_margin / total_revenue * 100) if total_revenue > 0 else 0
-            st.metric("Avg Margin %", f"{avg_margin_pct:.1f}%")
-        
-        with col4:
-            total_units = df_financial['Sales_Qty'].sum()
-            avg_price = total_revenue / total_units if total_units > 0 else 0
-            st.metric("Avg Selling Price", f"Rp {avg_price:.2f}")
-        
-        # 2. INVENTORY VALUE (Real Impact!)
+        # --- A. EXECUTIVE SUMMARY (BIG NUMBERS) ---
         st.divider()
-        st.subheader("📦 Inventory Financial Value")
         
-        if not df_inventory_financial.empty:
-            total_cost_value = df_inventory_financial['Value_at_Cost'].sum()
-            total_retail_value = df_inventory_financial['Value_at_Retail'].sum()
-            total_potential_margin = df_inventory_financial['Potential_Margin'].sum()
-            inventory_margin_pct = (total_potential_margin / total_retail_value * 100) if total_retail_value > 0 else 0
-            
-            col_inv1, col_inv2, col_inv3, col_inv4 = st.columns(4)
-            
-            with col_inv1:
-                st.metric("Inventory @ Cost", f"Rp {total_cost_value:,.0f}")
-            
-            with col_inv2:
-                st.metric("Inventory @ Retail", f"Rp {total_retail_value:,.0f}")
-            
-            with col_inv3:
-                st.metric("Potential Margin", f"Rp {total_potential_margin:,.0f}")
-            
-            with col_inv4:
-                st.metric("Inventory Margin %", f"{inventory_margin_pct:.1f}%")
-            
-            # Show high value inventory
-            high_value_skus = df_inventory_financial.sort_values('Value_at_Cost', ascending=False).head(10)
-            
-            st.markdown("#### 📊 Top 10 Highest Value Inventory Items")
-            st.dataframe(
-                high_value_skus[['SKU_ID', 'Product_Name', 'Brand', 'Stock_Qty', 
-                               'Value_at_Cost', 'Value_at_Retail', 'Potential_Margin', 'Margin_Percentage']],
-                column_config={
-                    "Value_at_Cost": st.column_config.NumberColumn("Value @ Cost", format="Rp  %.0f"),
-                    "Value_at_Retail": st.column_config.NumberColumn("Value @ Retail", format="Rp  %.0f"),
-                    "Potential_Margin": st.column_config.NumberColumn("Potential Margin", format="Rp  %.0f"),
-                    "Margin_Percentage": st.column_config.ProgressColumn("Margin %", format="%.1f%%", min_value=0, max_value=100)
-                },
-                use_container_width=True
-            )
+        total_rev = df_fin_combined['Revenue'].sum()
+        total_margin = df_fin_combined['Gross_Margin'].sum()
+        total_qty = df_fin_combined['Qty'].sum()
+        avg_margin_pct = (total_margin / total_rev * 100) if total_rev > 0 else 0
         
-        # 3. PROFITABILITY TREND
+        # Channel Mix
+        rev_by_channel = df_fin_combined.groupby('Channel')['Revenue'].sum()
+        ecomm_rev = rev_by_channel.get('Ecommerce', 0)
+        res_rev = rev_by_channel.get('Reseller', 0)
+        ecomm_share = (ecomm_rev / total_rev * 100) if total_rev > 0 else 0
+        
+        col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
+        
+        with col_kpi1:
+            st.metric("Total Revenue 2026", f"Rp {total_rev:,.0f}", help="Gross Revenue Projection")
+            
+        with col_kpi2:
+            st.metric("Total Gross Margin", f"Rp {total_margin:,.0f}", help="Revenue - COGS (Net Order Price)")
+            
+        with col_kpi3:
+            st.metric("Blended Margin %", f"{avg_margin_pct:.1f}%", 
+                     delta="Health Indicator", delta_color="normal" if avg_margin_pct > 30 else "off")
+            
+        with col_kpi4:
+            st.metric("Channel Mix (Ecomm)", f"{ecomm_share:.1f}%", 
+                     delta=f"Reseller: {100-ecomm_share:.1f}%", delta_color="off")
+
+        # --- B. CHANNEL PERFORMANCE COMPARISON ---
         st.divider()
-        st.subheader("📈 Monthly Profitability Trend")
+        st.subheader("🏢 Channel Profitability Comparison")
         
-        monthly_profit = df_financial.groupby('Month').agg({
-            'Revenue': 'sum',
-            'Gross_Margin': 'sum',
-            'Sales_Qty': 'sum'
-        }).reset_index()
+        c1, c2 = st.columns([2, 1])
         
-        monthly_profit['Margin_Percentage'] = np.where(
-            monthly_profit['Revenue'] > 0,
-            (monthly_profit['Gross_Margin'] / monthly_profit['Revenue'] * 100),
-            0
-        )
-        
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=monthly_profit['Month'].dt.strftime('%b-%Y'),
-            y=monthly_profit['Revenue'],
-            name='Revenue',
-            marker_color='#667eea'
-        ))
-        fig.add_trace(go.Scatter(
-            x=monthly_profit['Month'].dt.strftime('%b-%Y'),
-            y=monthly_profit['Margin_Percentage'],
-            name='Margin %',
-            yaxis='y2',
-            line=dict(color='#4CAF50', width=3)
-        ))
-        
-        fig.update_layout(
-            title='Monthly Revenue vs Margin %',
-            yaxis=dict(title='Revenue (Rp )'),
-            yaxis2=dict(title='Margin %', overlaying='y', side='right'),
-            height=400
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # 4. TOP PERFORMING SKUs BY MARGIN
-        st.divider()
-        st.subheader("🏆 Top Performing SKUs by Gross Margin")
-        
-        if not profitability_segments.empty:
-            # Top 10 by absolute margin
-            st.dataframe(
-                profitability_segments.head(10)[['SKU_ID', 'Product_Name', 'Brand', 
-                                               'Sales_Qty', 'Revenue', 'Gross_Margin', 'Margin_Percentage', 'Margin_Segment']],
-                column_config={
-                    "Revenue": st.column_config.NumberColumn("Revenue", format="Rp  %.0f"),
-                    "Gross_Margin": st.column_config.NumberColumn("Gross Margin", format="Rp  %.0f"),
-                    "Margin_Percentage": st.column_config.ProgressColumn("Margin %", format="%.1f%%", min_value=0, max_value=100)
-                },
-                use_container_width=True
-            )
+        with c1:
+            # Monthly Revenue Stacked Bar
+            monthly_ch_rev = df_fin_combined.groupby(['Month_Label', 'Month_Date', 'Channel'])['Revenue'].sum().reset_index()
+            monthly_ch_rev = monthly_ch_rev.sort_values('Month_Date')
             
-            # Margin segmentation analysis
-            st.divider()
-            st.subheader("📊 Margin Segmentation Analysis")
+            fig_stack = px.bar(monthly_ch_rev, x='Month_Label', y='Revenue', color='Channel',
+                             title="Monthly Revenue Contribution by Channel",
+                             color_discrete_map={'Ecommerce': '#667eea', 'Reseller': '#FF9800'},
+                             text_auto='.2s')
+            fig_stack.update_layout(height=400, yaxis_title="Revenue (Rp)")
+            st.plotly_chart(fig_stack, use_container_width=True)
             
-            segment_summary = profitability_segments.groupby('Margin_Segment').agg({
-                'SKU_ID': 'count',
+        with c2:
+            # Profitability Summary Table per Channel
+            ch_summary = df_fin_combined.groupby('Channel').agg({
                 'Revenue': 'sum',
                 'Gross_Margin': 'sum',
-                'Sales_Qty': 'sum'
+                'Qty': 'sum'
+            }).reset_index()
+            ch_summary['Margin %'] = (ch_summary['Gross_Margin'] / ch_summary['Revenue'] * 100)
+            
+            # Donut Chart Revenue
+            fig_donut = px.pie(ch_summary, values='Revenue', names='Channel', hole=0.4,
+                             title="Revenue Share", color='Channel',
+                             color_discrete_map={'Ecommerce': '#667eea', 'Reseller': '#FF9800'})
+            fig_donut.update_layout(height=400)
+            st.plotly_chart(fig_donut, use_container_width=True)
+
+        # Show mini table for Channel
+        ch_disp = ch_summary.copy()
+        ch_disp['Revenue'] = ch_disp['Revenue'].apply(lambda x: f"Rp {x:,.0f}")
+        ch_disp['Gross_Margin'] = ch_disp['Gross_Margin'].apply(lambda x: f"Rp {x:,.0f}")
+        ch_disp['Margin %'] = ch_disp['Margin %'].apply(lambda x: f"{x:.1f}%")
+        ch_disp['Qty'] = ch_disp['Qty'].apply(lambda x: f"{x:,.0f}")
+        st.dataframe(ch_disp, use_container_width=True)
+
+        # --- C. BRAND PROFITABILITY MATRIX ---
+        st.divider()
+        st.subheader("🏷️ Brand Profitability Matrix")
+        st.caption("Analisis posisi Brand berdasarkan kontribusi Revenue dan tingkat Profitabilitas (Margin %)")
+        
+        if 'Brand' in df_fin_combined.columns:
+            brand_fin = df_fin_combined.groupby('Brand').agg({
+                'Revenue': 'sum',
+                'Gross_Margin': 'sum',
+                'Qty': 'sum'
             }).reset_index()
             
-            segment_summary['Avg_Margin_Percentage'] = (segment_summary['Gross_Margin'] / segment_summary['Revenue'] * 100)
-            segment_summary = segment_summary.sort_values('Revenue', ascending=False)
+            brand_fin['Margin %'] = (brand_fin['Gross_Margin'] / brand_fin['Revenue'] * 100).fillna(0)
             
-            col_seg1, col_seg2 = st.columns(2)
+            # Quadrant Scatter Plot
+            fig_scat = px.scatter(brand_fin, x='Revenue', y='Margin %', 
+                                size='Gross_Margin', color='Brand',
+                                hover_name='Brand', text='Brand',
+                                title="Brand Matrix: Revenue vs Margin % (Size = Gross Margin Value)",
+                                labels={'Revenue': 'Total Revenue 2026 (Rp)', 'Margin %': 'Gross Margin %'},
+                                height=500)
             
-            with col_seg1:
-                # Pie chart
-                fig_pie = px.pie(segment_summary, values='Revenue', names='Margin_Segment',
-                                title='Revenue Distribution by Margin Segment',
-                                color='Margin_Segment',
-                                color_discrete_map={
-                                    'High Margin (>40%)': '#4CAF50',
-                                    'Medium Margin (20-40%)': '#FF9800',
-                                    'Low Margin (<20%)': '#F44336',
-                                    'Negative Margin': '#9E9E9E'
-                                })
-                fig_pie.update_layout(height=400)
-                st.plotly_chart(fig_pie, use_container_width=True)
+            # Add Quadrant Lines (Median)
+            med_rev = brand_fin['Revenue'].median()
+            med_mar = brand_fin['Margin %'].median()
             
-            with col_seg2:
-                # Bar chart
-                fig_bar = px.bar(segment_summary, x='Margin_Segment', y='Avg_Margin_Percentage',
-                                title='Average Margin % by Segment',
-                                color='Margin_Segment',
-                                color_discrete_map={
-                                    'High Margin (>40%)': '#4CAF50',
-                                    'Medium Margin (20-40%)': '#FF9800',
-                                    'Low Margin (<20%)': '#F44336',
-                                    'Negative Margin': '#9E9E9E'
-                                })
-                fig_bar.update_layout(height=400)
-                st.plotly_chart(fig_bar, use_container_width=True)
-        
-        # 5. SEASONALITY ANALYSIS
+            fig_scat.add_hline(y=med_mar, line_dash="dash", line_color="gray", annotation_text="Avg Margin")
+            fig_scat.add_vline(x=med_rev, line_dash="dash", line_color="gray", annotation_text="Avg Revenue")
+            fig_scat.update_traces(textposition='top center')
+            
+            st.plotly_chart(fig_scat, use_container_width=True)
+            
+            # --- TIER PROFITABILITY STACKED BAR ---
+            if 'SKU_Tier' in df_fin_combined.columns:
+                st.markdown("#### 📦 Profitability by Tier")
+                tier_fin = df_fin_combined.groupby(['SKU_Tier', 'Channel'])['Gross_Margin'].sum().reset_index()
+                
+                fig_tier = px.bar(tier_fin, x='SKU_Tier', y='Gross_Margin', color='Channel',
+                                title="Gross Margin Contribution by Tier & Channel",
+                                color_discrete_map={'Ecommerce': '#667eea', 'Reseller': '#FF9800'},
+                                barmode='group')
+                fig_tier.update_layout(yaxis_title="Gross Margin (Rp)")
+                st.plotly_chart(fig_tier, use_container_width=True)
+
+        # --- D. TOP PERFORMING SKUS ---
         st.divider()
-        st.subheader("🌊 Seasonality Analysis")
+        st.subheader("🏆 SKU Leaderboard 2026")
         
-        if not seasonal_pattern.empty:
-            fig_seasonal = go.Figure()
-            
-            fig_seasonal.add_trace(go.Scatter(
-                x=seasonal_pattern['Month_Name'],
-                y=seasonal_pattern['Seasonal_Index_Revenue'],
-                name='Revenue Index',
-                mode='lines+markers',
-                line=dict(color='#667eea', width=3),
-                marker=dict(size=8, color='#667eea')
-            ))
-            
-            fig_seasonal.add_trace(go.Scatter(
-                x=seasonal_pattern['Month_Name'],
-                y=seasonal_pattern['Seasonal_Index_Margin'],
-                name='Margin Index',
-                mode='lines+markers',
-                line=dict(color='#4CAF50', width=3),
-                marker=dict(size=8, color='#4CAF50')
-            ))
-            
-            fig_seasonal.add_hline(y=1, line_dash="dash", line_color="gray",
-                                 annotation_text="Average = 1.0")
-            
-            fig_seasonal.update_layout(
-                height=400,
-                title='Seasonal Indices (Monthly Average = 1.0)',
-                xaxis_title='Month',
-                yaxis_title='Seasonal Index',
-                hovermode='x unified'
-            )
-            
-            st.plotly_chart(fig_seasonal, use_container_width=True)
-            
-            # Season recommendations
-            peak_months = seasonal_pattern[seasonal_pattern['Seasonal_Index_Revenue'] >= 1.2]
-            low_months = seasonal_pattern[seasonal_pattern['Seasonal_Index_Revenue'] < 0.9]
-            
-            if not peak_months.empty:
-                st.info(f"**📈 Peak Season:** {', '.join(peak_months['Month_Name'].tolist())}")
-            
-            if not low_months.empty:
-                st.warning(f"**📉 Low Season:** {', '.join(low_months['Month_Name'].tolist())}")
+        rank_col1, rank_col2 = st.columns(2)
         
-        # 6. FINANCIAL RECOMMENDATIONS
+        # Aggregasi per SKU
+        sku_fin = df_fin_combined.groupby(['SKU_ID', 'Product_Name', 'Brand']).agg({
+            'Revenue': 'sum', 'Gross_Margin': 'sum', 'Qty': 'sum'
+        }).reset_index()
+        sku_fin['Margin %'] = (sku_fin['Gross_Margin'] / sku_fin['Revenue'] * 100)
+        
+        with rank_col1:
+            st.markdown("**Top 10 SKUs by Revenue (Omzet)**")
+            top_rev = sku_fin.sort_values('Revenue', ascending=False).head(10).copy()
+            
+            # Format
+            top_rev['Revenue'] = top_rev['Revenue'].apply(lambda x: f"Rp {x:,.0f}")
+            top_rev['Gross_Margin'] = top_rev['Gross_Margin'].apply(lambda x: f"Rp {x:,.0f}")
+            top_rev['Margin %'] = top_rev['Margin %'].apply(lambda x: f"{x:.1f}%")
+            
+            st.dataframe(top_rev[['SKU_ID', 'Product_Name', 'Revenue', 'Margin %']], use_container_width=True)
+            
+        with rank_col2:
+            st.markdown("**Top 10 SKUs by Gross Margin (Cuan)**")
+            top_cuan = sku_fin.sort_values('Gross_Margin', ascending=False).head(10).copy()
+            
+            # Format
+            top_cuan['Revenue'] = top_cuan['Revenue'].apply(lambda x: f"Rp {x:,.0f}")
+            top_cuan['Gross_Margin'] = top_cuan['Gross_Margin'].apply(lambda x: f"Rp {x:,.0f}")
+            top_cuan['Margin %'] = top_cuan['Margin %'].apply(lambda x: f"{x:.1f}%")
+            
+            st.dataframe(top_cuan[['SKU_ID', 'Product_Name', 'Gross_Margin', 'Margin %']], use_container_width=True)
+
+        # --- E. DOWNLOAD DATA ---
         st.divider()
-        st.subheader("💡 Financial Recommendations")
+        st.subheader("📥 Download Combined Financial Data")
         
-        recommendations = []
+        dl_df = df_fin_combined.copy()
+        # Clean up for export
+        dl_csv = dl_df.to_csv(index=False)
+        st.download_button(
+            label="Download Combined Forecast 2026 (CSV)",
+            data=dl_csv,
+            file_name=f"Combined_Financial_Forecast_2026_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
         
-        # High margin SKU analysis
-        if not profitability_segments.empty:
-            high_margin_skus = profitability_segments[profitability_segments['Margin_Segment'] == 'High Margin (>40%)']
-            low_margin_skus = profitability_segments[profitability_segments['Margin_Segment'] == 'Low Margin (<20%)']
-            negative_margin_skus = profitability_segments[profitability_segments['Margin_Segment'] == 'Negative Margin']
-            
-            if not high_margin_skus.empty:
-                recommendations.append(f"✅ **Focus on High Margin SKUs:** {len(high_margin_skus)} SKUs with >40% margin contribute Rp {high_margin_skus['Gross_Margin'].sum():,.0f} margin")
-            
-            if not low_margin_skus.empty:
-                recommendations.append(f"⚠️ **Review Low Margin SKUs:** {len(low_margin_skus)} SKUs with <20% margin")
-            
-            if not negative_margin_skus.empty:
-                recommendations.append(f"❌ **Urgent Action Needed:** {len(negative_margin_skus)} SKUs with negative margin")
-        
-        # Inventory financial risk
-        if not df_inventory_financial.empty:
-            slow_moving_high_value = df_inventory_financial[
-                (df_inventory_financial['Value_at_Cost'] > 1000) & 
-                (df_inventory_financial['Stock_Qty'] > 100)
-            ]
-            
-            if not slow_moving_high_value.empty:
-                recommendations.append(f"📉 **Inventory Risk:** {len(slow_moving_high_value)} high-value items (>Rp 1000) with high stock levels")
-        
-        # Display recommendations
-        if recommendations:
-            st.markdown("#### 🚀 Action Items:")
-            for rec in recommendations:
-                st.write(f"- {rec}")
-        else:
-            st.success("✅ **Excellent financial performance!** No major issues detected.")
-            
     else:
-        st.warning("Financial data not available. Check price columns in Product Master.")
+        st.info("ℹ️ Please ensure both Ecommerce and Reseller forecast sheets have data for 2026 to generate this analysis.")
 
 
 # --- TAB 9: RESELLER FORECAST ANALYSIS ---
