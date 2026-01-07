@@ -4144,7 +4144,7 @@ with tab7:
         fig.update_layout(**layout_config)
         st.plotly_chart(fig, use_container_width=True)
 
-        # --- SECTION 3: NEW QUARTERLY ANALYSIS ---
+# --- SECTION 3: NEW QUARTERLY ANALYSIS (FIXED) ---
         st.divider()
         st.subheader("📅 Quarterly Brand Analysis (Qty & Value)")
         
@@ -4246,13 +4246,16 @@ with tab7:
                         if col != 'Brand':
                             df_q_val_disp[col] = df_q_val_disp[col].apply(lambda x: f"Rp {format_number(x)}")
                     
-                    # Visual Heatmap
+                    # Visual Heatmap (FIXED HERE)
                     fig_heat_val = go.Figure(data=go.Heatmap(
                         z=df_q_val[active_quarters].head(10).values,
                         x=active_quarters,
                         y=df_q_val['Brand'].head(10),
                         colorscale='Greens',
-                        texttemplate="Rp %{text:.2s}" # Short format for Rupiah
+                        # INI BARIS YANG TADI HILANG:
+                        text=df_q_val[active_quarters].head(10).values, 
+                        # ---------------------------
+                        texttemplate="Rp %{text:.2s}" # Short format: 15B, 100M, etc
                     ))
                     fig_heat_val.update_layout(height=400, title="Top 10 Brands - Quarterly Value Heatmap")
                     st.plotly_chart(fig_heat_val, use_container_width=True)
