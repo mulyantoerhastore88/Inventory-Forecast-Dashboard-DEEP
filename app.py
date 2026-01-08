@@ -4589,26 +4589,28 @@ with tab9:
     st.subheader("🤝 Reseller Forecast Analysis 2026")
     st.markdown("**Analyze Reseller forecast data (2026 Projection with 2025 History)**")
     
-    # ================ 0. ROBUST DATE PARSER (FIX "JAN 26" SPACE) ================
+    # ================ 0. ROBUST DATE PARSER (FIXED FOR UNDERSCORE) ================
     def get_date_object(col_name):
         """
-        Mengubah string kolom (Jan 25 / Jan-25) menjadi datetime object.
-        Support pemisah SPASI dan STRIP.
+        Mengubah string kolom (Jan 25 / Jan-25 / Jan_25) menjadi datetime object.
+        Support pemisah SPASI, STRIP, dan UNDERSCORE.
         """
         try:
             col_name = str(col_name).strip().lower()
             
-            # --- UPDATE: Cek Separator (Bisa Spasi atau Strip) ---
-            if '-' in col_name: 
-                parts = col_name.split('-')
-            elif ' ' in col_name: 
-                parts = col_name.split(' ')
-            else: 
-                return None
+            # --- FIX: Normalisasi pemisah menjadi spasi semua ---
+            # Ini mengatasi masalah karena loader mengubah spasi jadi underscore
+            col_name_clean = col_name.replace('_', ' ').replace('-', ' ')
             
-            # Validasi panjang hasil split
+            parts = col_name_clean.split(' ')
+            
+            # Validasi panjang hasil split (harus ada bulan dan tahun)
             if len(parts) < 2: return None
             
+            # Filter elemen kosong jika ada double space
+            parts = [p for p in parts if p]
+            if len(parts) < 2: return None
+
             m_str = parts[0][:3] # Ambil 3 huruf pertama (jan, feb...)
             y_str = parts[1]     # Ambil tahun (25, 2025...)
             
@@ -4657,7 +4659,7 @@ with tab9:
         # Sort berdasarkan tanggal (PENTING)
         month_map_cols.sort(key=lambda x: x[1])
         
-        # Ambil nama kolom yang sudah urut (Original Name dari GSheet)
+        # Ambil nama kolom yang sudah urut
         sorted_month_cols = [x[0] for x in month_map_cols]
         
         # Pisahkan Historical (2025) vs Forecast (2026)
@@ -4665,6 +4667,7 @@ with tab9:
         fcst_cols = [x[0] for x in month_map_cols if x[1].year == 2026]
         
         # --- B. Identifikasi Kolom Atribut ---
+        # Mencari kolom Brand, Tier, Price meskipun sudah diubah jadi lowercase/underscore
         cols_lower = {c.lower(): c for c in all_columns}
         
         brand_col = next((cols_lower[c] for c in cols_lower if 'brand' in c), 'Brand')
@@ -4699,7 +4702,7 @@ with tab9:
         st.subheader("📈 Reseller Forecast Overview (2026)")
         
         if not sorted_month_cols:
-            st.error(f"⚠️ Error: Tidak dapat mendeteksi kolom bulan. Pastikan format kolom seperti 'Jan 25', 'Feb 26', dll. Sample kolom yang ada: {all_columns[:5]}")
+            st.error(f"⚠️ Error: Tidak dapat mendeteksi kolom bulan. Pastikan format kolom seperti 'Jan 25', 'Feb 26'. Deteksi gagal pada kolom: {all_columns[:5]}")
             st.stop()
 
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
@@ -4912,6 +4915,10 @@ with tab9:
         else: period_cols = sorted_month_cols
         
         final_cols = disp_cols + period_cols
+        
+        # Validasi kolom ada
+        final_cols = [c for c in final_cols if c in df_reseller_forecast.columns]
+        
         df_exp = df_reseller_forecast.copy()
         if exp_brands: df_exp = df_exp[df_exp[brand_col].isin(exp_brands)]
         
