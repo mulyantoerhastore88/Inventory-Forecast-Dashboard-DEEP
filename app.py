@@ -443,27 +443,47 @@ def load_and_process_data(_client):
         # 5. STOCK DATA
         ws_stock = _client.open_by_url(gsheet_url).worksheet("Stock_Onhand")
         df_stock_raw = pd.DataFrame(ws_stock.get_all_records())
+        # Normalisasi nama kolom (spasi jadi underscore)
         df_stock_raw.columns = [col.strip().replace(' ', '_') for col in df_stock_raw.columns]
         
+        # --- PERBAIKAN DISINI: Tambahkan 'Qty_Available' ke list pencarian ---
         stock_col = None
-        for col in ['Quantity_Available', 'Stock_Qty', 'STOCK_SAP']:
-            if col in df_stock_raw.columns:
-                stock_col = col
+        # List prioritas nama kolom stok yang mungkin muncul
+        possible_stock_cols = [
+            'Qty_Available',       # Target utama Anda
+            'Quantity_Available',  # Variasi lain
+            'Stock_Qty',           # Standar internal
+            'STOCK_SAP',           # Format SAP
+            'Qty',                 # Singkatan
+            'Quantity'             # Umum
+        ]
+        
+        for col in possible_stock_cols:
+            # Cari case-insensitive (misal qty_available vs Qty_Available)
+            match = next((c for c in df_stock_raw.columns if c.lower() == col.lower()), None)
+            if match:
+                stock_col = match
                 break
         
         if stock_col and 'SKU_ID' in df_stock_raw.columns:
-            df_stock = pd.DataFrame({
-                'SKU_ID': df_stock_raw['SKU_ID'],
-                'Stock_Qty': pd.to_numeric(df_stock_raw[stock_col], errors='coerce').fillna(0)
-            })
+            # Ambil kolom penting lainnya jika ada untuk Tab 3 (Category, Expiry, dll)
+            # Kita load semua dulu ke df_stock agar Tab 3 bisa memprosesnya
+            df_stock = df_stock_raw.copy()
             
-            df_stock = df_stock.groupby('SKU_ID')['Stock_Qty'].max().reset_index()
+            # Pastikan kolom utama 'Stock_Qty' terbentuk dari kolom yang ditemukan
+            df_stock['Stock_Qty'] = pd.to_numeric(df_stock[stock_col], errors='coerce').fillna(0)
+            
+            # Filter hanya SKU aktif (Opsional, tergantung kebutuhan inventory check)
             df_stock = df_stock[df_stock['SKU_ID'].isin(active_skus)]
             
             # ADD PRODUCT INFO LOOKUP (with prices)
             df_stock = add_product_info_to_data(df_stock, df_product)
             
             data['stock'] = df_stock
+        else:
+            # Fallback agar tidak error jika kolom tidak ketemu
+            st.warning(f"⚠️ Kolom Stock tidak ditemukan. Kolom tersedia: {list(df_stock_raw.columns)}")
+            data['stock'] = pd.DataFrame(columns=['SKU_ID', 'Stock_Qty'])
         
         # 6. FORECAST 2026 ECOMM (sebelumnya Rofo_onwards)
         try:
