@@ -2757,7 +2757,6 @@ with tab2:
 # --- TAB 3: INVENTORY ANALYSIS (UPDATED) ---
 with tab3:
     st.subheader("📦 Inventory Analysis: Category, Age & Health")
-    
     # ========================================================
     # 1. DATA PREPARATION & ENRICHMENT (KHUSUS TAB 3)
     # ========================================================
@@ -2765,23 +2764,59 @@ with tab3:
     # Ambil data stock raw
     df_inv_analysis = df_stock.copy()
     
-    # --- A. Standardization Column Names ---
-    # Pastikan nama kolom sesuai request (Qty_Available -> Stock_Qty untuk konsistensi internal)
-    # Jika kolom di gsheet 'Qty_Available', kita rename ke 'Stock_Qty' agar kompatibel dengan logic visualisasi lama
-    col_map = {
-        'Qty_Available': 'Stock_Qty',
-        'Quantity_Available': 'Stock_Qty',
-        'Product_Code': 'Anchanto_Code'
-    }
-    df_inv_analysis = df_inv_analysis.rename(columns=col_map)
+    # --- A. SMART COLUMN MAPPING (Anti-Error) ---
+    # Kita buat logic pencari kolom otomatis agar tidak error jika nama kolom berubah sedikit
+    
+    # 1. Normalisasi nama kolom asli (hilangkan spasi, jadi lowercase) untuk pencarian
+    col_mapping = {c.lower().replace(' ', '_').strip(): c for c in df_inv_analysis.columns}
+    
+    # 2. Cari kolom QTY (Prioritas: stock_qty -> qty_available -> quantity_available -> qty -> quantity)
+    possible_qty_names = ['stock_qty', 'qty_available', 'quantity_available', 'qty', 'quantity', 'stock_sap']
+    found_qty_col = None
+    
+    for candidate in possible_qty_names:
+        if candidate in col_mapping:
+            found_qty_col = col_mapping[candidate] # Ambil nama asli kolomnya
+            break
+            
+    # 3. Cari kolom PRODUCT CODE (anchanto)
+    possible_code_names = ['product_code', 'anchanto_code', 'sku_code', 'code']
+    found_code_col = None
+    
+    for candidate in possible_code_names:
+        if candidate in col_mapping:
+            found_code_col = col_mapping[candidate]
+            break
+
+    # 4. EXECUTE RENAME
+    rename_dict = {}
+    if found_qty_col:
+        rename_dict[found_qty_col] = 'Stock_Qty'
+    if found_code_col:
+        rename_dict[found_code_col] = 'Anchanto_Code'
+        
+    df_inv_analysis = df_inv_analysis.rename(columns=rename_dict)
+    
+    # --- CRITICAL CHECK ---
+    # Jika setelah rename 'Stock_Qty' masih tidak ada, hentikan proses dan tampilkan error yang jelas
+    if 'Stock_Qty' not in df_inv_analysis.columns:
+        st.error("🚨 ERROR KRITIS: Kolom 'Qty_Available' atau 'Stock_Qty' tidak ditemukan di data Stock_Onhand.")
+        st.write("Kolom yang terdeteksi di GSheet saat ini:", list(df_stock.columns))
+        st.stop() # Stop render agar tidak crash code python-nya
+
+    # --- Lanjutkan proses seperti biasa ---
     
     # Pastikan Stock_Category ada (fill 'Unknown' jika kosong)
-    if 'Stock_Category' not in df_inv_analysis.columns:
-        df_inv_analysis['Stock_Category'] = 'SKU Regular' # Default fallback
-    else:
+    # Cek variasi penulisan Stock Category
+    cat_col_real = next((c for c in df_inv_analysis.columns if 'stock_cat' in c.lower() or 'category' in c.lower()), None)
+    if cat_col_real:
+        df_inv_analysis = df_inv_analysis.rename(columns={cat_col_real: 'Stock_Category'})
         df_inv_analysis['Stock_Category'] = df_inv_analysis['Stock_Category'].fillna('Unknown')
+    else:
+        df_inv_analysis['Stock_Category'] = 'SKU Regular' # Default fallback jika kolom tidak ada
 
     # --- B. Expiry Date Processing (dd/mm/yyyy) ---
+    
     def process_expiry(date_str):
         try:
             # Handle format dd/mm/yyyy
