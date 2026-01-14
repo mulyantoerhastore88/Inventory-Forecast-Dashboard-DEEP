@@ -4748,33 +4748,57 @@ with tab10:
             st.plotly_chart(fig_dual, use_container_width=True)
             
         with c2:
-            st.subheader("💰 Cost Structure Trend")
-            # Membandingkan Total Cost vs BSA (Base Service Amount)
+            st.subheader("💰 Cost Structure Trend (Dual Axis)")
+            # Membandingkan Total Cost (Kiri) vs BSA (Kanan) karena skala angka jauh berbeda
             
             fig_area = go.Figure()
             
+            # Trace 1: Total Cost (Sumbu Kiri - Jutaan) - Area Chart
             fig_area.add_trace(go.Scatter(
                 x=df_bs['Month'], 
                 y=df_bs['Total Cost'], 
                 name='Total Cost',
                 fill='tozeroy',
-                line=dict(color='#FF9800')
+                line=dict(color='#FF9800', width=2),
+                hovertemplate='Total: Rp %{y:,.0f}'
             ))
             
+            # Trace 2: BSA (Sumbu Kanan - Ratusan Ribu) - Line Chart Tebal
             fig_area.add_trace(go.Scatter(
                 x=df_bs['Month'], 
                 y=df_bs['BSA'], 
                 name='BSA Cost',
-                fill='tozeroy',
-                line=dict(color='#4CAF50')
+                mode='lines+markers', # Pakai marker biar kelihatan titiknya
+                line=dict(color='#4CAF50', width=4), # Garis lebih tebal biar standout
+                yaxis='y2', # <--- KUNCI: Lempar ke Sumbu Kanan
+                hovertemplate='BSA: Rp %{y:,.0f}'
             ))
             
             fig_area.update_layout(
                 height=400,
                 xaxis_title="Month",
-                yaxis_title="Amount (Rp)",
+                
+                # Sumbu Kiri (Total Cost)
+                yaxis=dict(
+                    title="Total Cost (Rp)", 
+                    titlefont=dict(color="#FF9800"),
+                    tickfont=dict(color="#FF9800"),
+                    side="left"
+                ),
+                
+                # Sumbu Kanan (BSA)
+                yaxis2=dict(
+                    title="BSA Cost (Rp)",
+                    titlefont=dict(color="#4CAF50"),
+                    tickfont=dict(color="#4CAF50"),
+                    overlaying="y",
+                    side="right",
+                    showgrid=False # Matikan grid kanan biar gak pusing
+                ),
+                
                 margin=dict(l=0, r=0, t=30, b=0),
-                legend=dict(orientation="h", y=1.1)
+                legend=dict(orientation="h", y=1.1),
+                hovermode="x unified"
             )
             st.plotly_chart(fig_area, use_container_width=True)
 
