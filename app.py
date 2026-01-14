@@ -2750,7 +2750,7 @@ with tab2:
                     avg_cover = tier_inv['Avg_Cover_Months'].mean()
                     st.metric("Average Cover All Tiers", f"{avg_cover:.1f} months")
 
-# --- TAB 3: INVENTORY ANALYSIS (SIMPLE & EXCEL-LIKE) ---
+# --- TAB 3: INVENTORY ANALYSIS (SIMPLE & EXCEL-LIKE + HEATMAP) ---
 with tab3:
     st.subheader("📦 Inventory Summary & Aging Report")
 
@@ -2914,7 +2914,7 @@ with tab3:
 
     st.divider()
 
-    # --- BAGIAN 3: EXPIRY & CATEGORY MATRIX (Kiri Bawah Image) ---
+    # --- BAGIAN 3: EXPIRY & CATEGORY MATRIX (HEATMAP ENABLED) ---
     st.markdown("##### 🗓️ Inventory Matrix: Category vs Expiry")
     
     # Pivot Table: Baris=Category, Kolom=Expiry, Value=Qty
@@ -2926,11 +2926,19 @@ with tab3:
     # Sort berdasarkan Total terbesar
     pivot_exp = pivot_exp.sort_values('Grand Total', ascending=False)
     
-    # Styling agar mudah dibaca (Heatmap style pada tabel)
-    st.dataframe(
-        pivot_exp.style.format("{:,.0f}").background_gradient(cmap="Blues", axis=None),
-        use_container_width=True
-    )
+    # Styling Heatmap (Membutuhkan matplotlib di requirements.txt)
+    try:
+        st.dataframe(
+            pivot_exp.style.format("{:,.0f}").background_gradient(cmap="Blues", axis=None),
+            use_container_width=True
+        )
+    except Exception as e:
+        # Fallback aman jika matplotlib belum terload sempurna
+        st.warning("⚠️ Visualisasi warna tabel (heatmap) memerlukan 'matplotlib'. Menampilkan tabel standar.")
+        st.dataframe(
+            pivot_exp.style.format("{:,.0f}"),
+            use_container_width=True
+        )
 
     # --- BAGIAN 4: CLEARANCE & GIMMICK DRILL-DOWN (Kanan Bawah Image) ---
     st.divider()
