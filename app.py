@@ -2741,7 +2741,7 @@ with tab2:
                     avg_cover = tier_inv['Avg_Cover_Months'].mean()
                     st.metric("Average Cover All Tiers", f"{avg_cover:.1f} months")
 
-# --- TAB 3: INVENTORY ANALYSIS (OPTIMIZED V2) ---
+# --- TAB 3: INVENTORY ANALYSIS (FILTERED > 0 ONLY) ---
 with tab3:
     st.subheader("📦 Inventory Health & Risk Matrix")
     
@@ -2772,6 +2772,14 @@ with tab3:
         
     # Pastikan numerik
     df_inv['Stock_Qty'] = pd.to_numeric(df_inv['Stock_Qty'], errors='coerce').fillna(0)
+    
+    # --- FILTER PENTING: HANYA AMBIL STOK > 0 ---
+    df_inv = df_inv[df_inv['Stock_Qty'] > 0]
+    
+    # Cek jika data kosong setelah filter
+    if df_inv.empty:
+        st.warning("⚠️ Tidak ada data Inventory dengan Qty > 0.")
+        st.stop()
     
     # Fill Category
     if 'Stock_Category' not in df_inv.columns:
@@ -2872,13 +2880,14 @@ with tab3:
     tot_val = df_view['Value_Retail'].sum()
     crit_val = df_view[df_view['Age_Category'] == 'Critical (<3 Mo)']['Value_Retail'].sum()
     fresh_val = df_view[df_view['Age_Category'] == 'Fresh (>12 Mo)']['Value_Retail'].sum()
+    # Dead Stock: Cover > 12 bulan DAN Sales 0 (tapi Stok > 0 karena sudah difilter di awal)
     dead_stock_val = df_view[(df_view['Cover_Months'] > 12) & (df_view['Avg_Sales_3M'] == 0)]['Value_Retail'].sum()
 
     k1, k2, k3, k4 = st.columns(4)
-    with k1: st.metric("Total Stock Value", f"Rp {tot_val:,.0f}", help="Valuasi berdasarkan Floor Price")
+    with k1: st.metric("Total Stock Value", f"Rp {tot_val:,.0f}", help="Valuasi berdasarkan Floor Price (Hanya Stok > 0)")
     with k2: st.metric("Potential Loss (Critical)", f"Rp {crit_val:,.0f}", delta="Risk", delta_color="inverse", help="Value barang expired < 3 bulan")
     with k3: st.metric("Fresh Stock Value", f"Rp {fresh_val:,.0f}", delta="Healthy", help="Value barang expired > 1 tahun")
-    with k4: st.metric("Dead Stock Value", f"Rp {dead_stock_val:,.0f}", delta="No Sales", delta_color="inverse", help="Barang tidak ada sales 3 bulan terakhir")
+    with k4: st.metric("Dead Stock Value", f"Rp {dead_stock_val:,.0f}", delta="No Sales", delta_color="inverse", help="Barang stok ada, tapi sales 0 dalam 3 bulan terakhir")
 
     # ========================================================
     # 4. ADVANCED VISUALIZATION
@@ -3026,7 +3035,7 @@ with tab3:
     st.divider()
     csv_full = df_view.to_csv(index=False)
     st.download_button(
-        label="📥 Download Full Inventory Analysis Data",
+        label="📥 Download Full Inventory Analysis Data (Qty > 0 Only)",
         data=csv_full,
         file_name=f"Inventory_Health_Analysis_{datetime.now().strftime('%Y%m%d')}.csv",
         mime="text/csv"
