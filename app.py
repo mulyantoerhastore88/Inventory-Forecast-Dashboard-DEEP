@@ -25,50 +25,111 @@ st.set_page_config(
 st.markdown("""
 <style>
     @media print {
-        /* 1. Sembunyikan elemen yang tidak perlu */
-        [data-testid="stSidebar"], 
-        [data-testid="stHeader"], 
-        .stButton, 
-        .stDeployButton,
-        footer {
-            display: none !important;
-        }
-
-        /* 2. FIX UTAMA: Paksa container utama untuk melebar penuh */
-        /* Ini yang mengatasi masalah halaman blank */
-        [data-testid="stAppViewContainer"] {
+        /* FIX UTAMA: Reset SEMUA element ke block/visible */
+        * {
             overflow: visible !important;
             position: static !important;
+            display: block !important;
+            float: none !important;
             height: auto !important;
-            width: 100% !important;
+            max-height: none !important;
+            width: auto !important;
+            max-width: none !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            break-inside: avoid !important;
+        }
+
+        /* Hide unnecessary elements */
+        [data-testid="stSidebar"],
+        [data-testid="stHeader"],
+        .stButton,
+        .stDeployButton,
+        footer,
+        .stDownloadButton,
+        .stActionButton,
+        button,
+        [data-testid="baseButton-secondary"],
+        [data-testid="baseButton-primary"],
+        .stAlert,
+        .stMarkdown:has(button) {
+            display: none !important;
+            height: 0 !important;
+            width: 0 !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+        }
+
+        /* Force main container to be visible */
+        [data-testid="stAppViewContainer"],
+        [data-testid="stMain"] {
+            position: static !important;
+            width: 100vw !important;
+            height: auto !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
             display: block !important;
         }
 
-        /* 3. Atur konten utama */
-        [data-testid="stMain"] {
+        /* Force all content to be visible */
+        section[data-testid="stMain"] > div,
+        [data-testid="block-container"] {
             overflow: visible !important;
-            position: static !important;
             height: auto !important;
-            width: 100% !important;
-            padding-top: 0px !important;
-            margin: 0px !important;
+            max-height: none !important;
+            display: block !important;
+            position: static !important;
+            break-inside: avoid;
         }
-        
-        /* 4. Pastikan blok konten di dalamnya juga terlihat */
-        [data-testid="stBlock"] {
+
+        /* Charts and tables - force visibility */
+        .element-container,
+        .stDataFrame,
+        .stPlotlyChart,
+        .stAltairChart,
+        [data-testid="stHorizontalBlock"] {
+            break-inside: avoid-page !important;
+            page-break-inside: avoid !important;
             overflow: visible !important;
+        }
+
+        /* Ensure text is black for printing */
+        body, h1, h2, h3, h4, h5, h6, p, div, span {
+            color: #000000 !important;
+            background-color: white !important;
+        }
+
+        /* Remove shadows and gradients for print */
+        .status-indicator,
+        .inventory-card,
+        .metric-highlight {
+            box-shadow: none !important;
+            background: white !important;
+            border: 1px solid #ccc !important;
+        }
+
+        /* Fix for Plotly charts */
+        .js-plotly-plot,
+        .plotly,
+        .plot-container {
+            width: 100% !important;
             height: auto !important;
         }
 
-        /* 5. Pastikan warna background grafik tercetak (Force Color) */
-        * {
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
+        /* Add page breaks between major sections */
+        .stTabs {
+            break-after: page !important;
         }
-        
-        /* Opsional: Ubah teks jadi hitam semua biar kontras di kertas */
-        body {
-            color: black !important;
+
+        /* Ensure all content fits page width */
+        .row {
+            display: block !important;
+        }
+
+        .column {
+            width: 100% !important;
+            float: none !important;
         }
     }
 </style>
