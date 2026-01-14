@@ -2750,7 +2750,7 @@ with tab2:
                     avg_cover = tier_inv['Avg_Cover_Months'].mean()
                     st.metric("Average Cover All Tiers", f"{avg_cover:.1f} months")
 
-# --- TAB 3: INVENTORY ANALYSIS (SIMPLE & EXCEL-LIKE + HEATMAP) ---
+# --- TAB 3: INVENTORY ANALYSIS (FIXED & ROBUST) ---
 with tab3:
     st.subheader("📦 Inventory Summary & Aging Report")
 
@@ -2766,7 +2766,8 @@ with tab3:
         'Quantity_Available': 'Stock_Qty',
         'Product_Code': 'Anchanto_Code',
         'Physical_Stock': 'Stock_Qty',
-        'Management_Expiry_Date': 'Expiry_Date'
+        'Management_Expiry_Date': 'Expiry_Date',
+        'Stock_Category': 'Stock_Category' 
     }
     # Rename kolom yang ada
     df_batch = df_batch.rename(columns={k: v for k, v in col_map.items() if k in df_batch.columns})
@@ -2780,12 +2781,28 @@ with tab3:
     df_batch['Stock_Qty'] = pd.to_numeric(df_batch['Stock_Qty'], errors='coerce').fillna(0)
     df_batch = df_batch[df_batch['Stock_Qty'] > 0]
 
-    # Isi kolom text kosong
+    # --- C. PEMBERSIHAN DATA KATEGORI (SOLUSI UTAMA) ---
+    # 1. Isi yang kosong dengan 'Unknown'
+    # 2. Pastikan jadi String
+    # 3. Strip (hapus spasi depan belakang)
     for c in ['Stock_Category', 'Brand', 'Product_Name', 'SKU_Tier']:
         if c not in df_batch.columns: df_batch[c] = 'Unknown'
-        df_batch[c] = df_batch[c].fillna('Unknown').astype(str)
+        df_batch[c] = df_batch[c].fillna('Unknown').astype(str).str.strip()
 
-    # --- C. Hitung Umur Expired (Batch Level) ---
+    # --- DEBUGGING (HAPUS NANTI KALAU SUDAH BENAR) ---
+    # Kita intip apa isi kolom Stock_Category sebenarnya menurut Python
+    with st.expander("🕵️‍♂️ Debug: Cek Isi Kolom Kategori", expanded=False):
+        unique_cats = df_batch['Stock_Category'].unique()
+        st.write("Kategori yang terbaca oleh Python:", unique_cats)
+        
+        # Cek khusus SKU Regular
+        reg_check = [x for x in unique_cats if 'REGULAR' in x.upper()]
+        if reg_check:
+            st.success(f"✅ Ditemukan kategori yang mengandung 'REGULAR': {reg_check}")
+        else:
+            st.error("❌ Tidak ada kategori yang mengandung kata 'REGULAR'")
+
+    # --- D. Hitung Umur Expired (Batch Level) ---
     def get_expiry_category(row):
         try:
             d_str = str(row.get('Expiry_Date', ''))
@@ -2807,8 +2824,7 @@ with tab3:
 
     df_batch['Expiry_Category'] = df_batch.apply(get_expiry_category, axis=1)
 
-    # --- D. Aggregasi ke SKU Level (Untuk Hitung Cover/Health) ---
-    # Kita butuh total stok per SKU (menggabungkan semua batch) untuk cek kesehatan stok
+    # --- E. Aggregasi ke SKU Level (Untuk Hitung Cover/Health) ---
     df_sku_agg = df_batch.groupby('SKU_ID').agg({
         'Stock_Qty': 'sum',
         'Stock_Category': 'first',
@@ -2826,9 +2842,13 @@ with tab3:
     else:
         df_sku_agg['Avg_Sales'] = 0
 
-    # Logic Remarks (Kesehatan Stok - Khusus Regular)
+    # --- F. Logic Remarks (Kesehatan Stok - LEBIH ROBUST) ---
     def get_stock_remark(row):
-        if row['Stock_Category'] != 'SKU Regular':
+        # Ubah ke uppercase biar aman dari typo huruf besar/kecil
+        cat = str(row['Stock_Category']).upper()
+        
+        # Cek apakah mengandung kata "REGULAR" (bukan exact match)
+        if 'REGULAR' not in cat:
             return '-'
         
         if row['Avg_Sales'] <= 0:
@@ -2845,23 +2865,18 @@ with tab3:
     # 2. TAMPILAN DASHBOARD (SIMPLE & CLEAN)
     # ========================================================
 
-    # --- BAGIAN 1: SUMMARY OF SOH SKU (Kiri Atas Image) ---
+    # --- BAGIAN 1: SUMMARY OF SOH SKU ---
     c1, c2 = st.columns([1, 2])
     
     with c1:
         st.markdown("##### 📊 Summary of SOH SKU")
-        # Group by Category
         soh_summary = df_batch.groupby('Stock_Category')['Stock_Qty'].sum().reset_index()
         total_soh = soh_summary['Stock_Qty'].sum()
         soh_summary['%'] = (soh_summary['Stock_Qty'] / total_soh * 100)
-        
-        # Urutkan terbesar
         soh_summary = soh_summary.sort_values('Stock_Qty', ascending=False)
         
-        # Tampilkan Metrics Besar
         st.metric("Grand Total Stock", f"{total_soh:,.0f}")
         
-        # Chart Donut Simple
         fig_don = px.pie(soh_summary, values='Stock_Qty', names='Stock_Category', hole=0.4, 
                          color_discrete_sequence=px.colors.qualitative.Prism)
         fig_don.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=250, showlegend=False)
@@ -2869,25 +2884,22 @@ with tab3:
 
     with c2:
         st.markdown("##### 📋 Detail Category Breakdown")
-        # Format Tabel
         soh_disp = soh_summary.copy()
         soh_disp['Stock_Qty'] = soh_disp['Stock_Qty'].apply(lambda x: f"{x:,.0f}")
         soh_disp['%'] = soh_disp['%'].apply(lambda x: f"{x:.1f}%")
         soh_disp = soh_disp.rename(columns={'Stock_Qty': 'Sum of Free Stock'})
-        
         st.dataframe(soh_disp, use_container_width=True, hide_index=True)
 
     st.divider()
 
     # --- BAGIAN 2: SUMMARY OF STOCK LEVEL (Kanan Atas Image) ---
-    # Fokus ke SKU Regular health check
     c3, c4 = st.columns([2, 1])
     
     with c3:
         st.markdown("##### 🏥 Health Check (Khusus SKU Regular)")
         
-        # Filter hanya SKU Regular
-        df_health = df_sku_agg[df_sku_agg['Stock_Category'] == 'SKU Regular'].copy()
+        # Filter Logic yang Lebih Aman (Contains REGULAR)
+        df_health = df_sku_agg[df_sku_agg['Stock_Category'].str.upper().str.contains('REGULAR')].copy()
         
         if not df_health.empty:
             health_summary = df_health.groupby('Remarks')['Stock_Qty'].sum().reset_index()
@@ -2902,10 +2914,9 @@ with tab3:
             
             st.dataframe(health_disp, use_container_width=True, hide_index=True)
         else:
-            st.info("Tidak ada SKU Regular.")
+            st.info("⚠️ Tidak ditemukan data dengan kategori 'SKU Regular'. Cek bagian Debug di atas.")
             
     with c4:
-        # Visualisasi Simple Bar untuk Health Check
         if not df_health.empty:
             fig_bar = px.bar(health_summary, x='Remarks', y='Stock_Qty', color='Remarks',
                              text_auto='.2s', title="Regular Stock Health")
@@ -2914,48 +2925,40 @@ with tab3:
 
     st.divider()
 
-    # --- BAGIAN 3: EXPIRY & CATEGORY MATRIX (HEATMAP ENABLED) ---
+    # --- BAGIAN 3: EXPIRY & CATEGORY MATRIX ---
     st.markdown("##### 🗓️ Inventory Matrix: Category vs Expiry")
     
-    # Pivot Table: Baris=Category, Kolom=Expiry, Value=Qty
-    # Kita pakai groupby lalu unstack untuk membuat matrix
-    pivot_exp = df_batch.groupby(['Stock_Category', 'Expiry_Category'])['Stock_Qty'].sum().unstack(fill_value=0)
+    pivot_exp = pd.pivot_table(
+        df_batch, 
+        values='Stock_Qty', 
+        index='Stock_Category', 
+        columns='Expiry_Category', 
+        aggfunc='sum', 
+        fill_value=0
+    )
     
-    # Tambahkan Total Row & Column
     pivot_exp['Grand Total'] = pivot_exp.sum(axis=1)
-    # Sort berdasarkan Total terbesar
     pivot_exp = pivot_exp.sort_values('Grand Total', ascending=False)
     
-    # Styling Heatmap (Membutuhkan matplotlib di requirements.txt)
-    try:
-        st.dataframe(
-            pivot_exp.style.format("{:,.0f}").background_gradient(cmap="Blues", axis=None),
-            use_container_width=True
-        )
-    except Exception as e:
-        # Fallback aman jika matplotlib belum terload sempurna
-        st.warning("⚠️ Visualisasi warna tabel (heatmap) memerlukan 'matplotlib'. Menampilkan tabel standar.")
-        st.dataframe(
-            pivot_exp.style.format("{:,.0f}"),
-            use_container_width=True
-        )
+    # Tampilkan dengan styling sederhana (No Matplotlib)
+    st.dataframe(
+        pivot_exp.style.format("{:,.0f}"), 
+        use_container_width=True
+    )
 
-    # --- BAGIAN 4: CLEARANCE & GIMMICK DRILL-DOWN (Kanan Bawah Image) ---
+    # --- BAGIAN 4: CLEARANCE & GIMMICK DRILL-DOWN ---
     st.divider()
-    st.markdown("##### 🔍 Drill Down: Clearance & Gimmick (Detail SKU)")
+    st.markdown("##### 🔍 Drill Down: Clearance & Gimmick")
     
     with st.expander("Buka Detail SKU Clearance / Gimmick", expanded=True):
-        # Filter data yg bukan Regular
-        df_drill = df_batch[df_batch['Stock_Category'].isin(['Clearance Sales', 'Gimmick', 'Gimmick Product'])].copy()
+        # Logic filter yang aman
+        mask_drill = ~df_batch['Stock_Category'].str.upper().str.contains('REGULAR')
+        df_drill = df_batch[mask_drill].copy()
         
         if not df_drill.empty:
-            # Grouping biar rapi per SKU+Expiry
             drill_view = df_drill.groupby(['Stock_Category', 'Expiry_Category', 'SKU_ID', 'Product_Name'])['Stock_Qty'].sum().reset_index()
             drill_view = drill_view.sort_values(['Stock_Category', 'Stock_Qty'], ascending=[True, False])
-            
-            # Format angka
             drill_view['Stock_Qty'] = drill_view['Stock_Qty'].apply(lambda x: f"{x:,.0f}")
-            
             st.dataframe(drill_view, use_container_width=True, hide_index=True)
         else:
             st.success("Tidak ada data Clearance atau Gimmick.")
@@ -2964,12 +2967,9 @@ with tab3:
     st.divider()
     c_dl1, c_dl2 = st.columns(2)
     with c_dl1:
-        # Download Aggregated (SKU Level)
         csv_agg = df_sku_agg.to_csv(index=False)
         st.download_button("📥 Download Summary (SKU Level)", csv_agg, "Stock_Summary_SKU.csv", "text/csv")
-        
     with c_dl2:
-        # Download Raw (Batch Level)
         csv_raw = df_batch.to_csv(index=False)
         st.download_button("📥 Download Detail (Batch Level)", csv_raw, "Stock_Detail_Batch.csv", "text/csv")
 
