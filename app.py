@@ -4660,7 +4660,7 @@ with tab9:
     else:
         st.error("❌ No Reseller forecast data available")
 
-# --- TAB 10: FULFILLMENT COST ANALYSIS (REVISI BSA) ---
+# --- TAB 10: FULFILLMENT COST ANALYSIS (FIXED & SAFE LAYOUT) ---
 with tab10:
     st.subheader("🚚 Fulfillment Cost Analysis (BS)")
     st.markdown("**Analisis Biaya Operasional & Basket Size (Business Support)**")
@@ -4686,7 +4686,6 @@ with tab10:
             curr_bsa = last_row['BSA'] # Basket Size Average
             prev_bsa = prev_row['BSA']
             delta_bsa = (curr_bsa - prev_bsa) / prev_bsa * 100 if prev_bsa > 0 else 0
-            # BSA Naik = Bagus (Hijau)
             st.metric(f"BSA (Avg Order Value)", f"Rp {curr_bsa:,.0f}", f"{delta_bsa:+.1f}%")
             
         with col_k3:
@@ -4706,13 +4705,13 @@ with tab10:
         # --- 2. COST & EFFICIENCY CHARTS ---
         c1, c2 = st.columns([2, 1])
         
+        # CHART 1: Cost Efficiency (Dual Axis) - FIXED
         with c1:
             st.subheader("📊 Cost Efficiency Trend")
-            # Dual Axis: Total Order vs % Cost
             
             fig_eff = go.Figure()
             
-            # Bar: Total Order
+            # Bar: Total Order (Kiri)
             fig_eff.add_trace(go.Bar(
                 x=df_bs['Month'], 
                 y=df_bs['Total Order(BS)'], 
@@ -4721,7 +4720,7 @@ with tab10:
                 opacity=0.7
             ))
             
-            # Line: % Cost (Y2)
+            # Line: % Cost (Kanan)
             fig_eff.add_trace(go.Scatter(
                 x=df_bs['Month'], 
                 y=df_bs['%Cost'], 
@@ -4730,30 +4729,34 @@ with tab10:
                 line=dict(color='#FF5252', width=3),
                 text=[f"{x:.2f}%" for x in df_bs['%Cost']],
                 textposition='top center',
-                yaxis='y2'
+                yaxis='y2' # Lempar ke sumbu kanan
             ))
             
+            # Layout Sederhana (Tanpa Font Styling yg bikin error)
             fig_eff.update_layout(
                 height=400,
                 xaxis_title="Month",
+                
+                # Sumbu Kiri
                 yaxis=dict(title="Total Order (Bar)"),
+                
+                # Sumbu Kanan
                 yaxis2=dict(
                     title="% Cost Ratio (Line)", 
                     overlaying="y", 
                     side="right", 
-                    showgrid=False,
-                    titlefont=dict(color="#FF5252"),
-                    tickfont=dict(color="#FF5252")
+                    showgrid=False
                 ),
+                
                 legend=dict(orientation="h", y=1.1),
                 margin=dict(l=0, r=0, t=30, b=0),
                 hovermode="x unified"
             )
             st.plotly_chart(fig_eff, use_container_width=True)
             
+        # CHART 2: Total Cost Trend (Single Axis)
         with c2:
             st.subheader("💰 Total Cost Trend")
-            # Hapus BSA dari sini, jadi cuma Total Cost (Area Chart)
             
             fig_cost = go.Figure()
             
@@ -4778,7 +4781,7 @@ with tab10:
 
         st.divider()
         
-        # --- 3. GMV CONTRIBUTION & BSA (DUAL AXIS) ---
+        # --- 3. GMV CONTRIBUTION & BSA (DUAL AXIS) - FIXED ---
         st.subheader("🏢 GMV Contribution & Basket Size (BSA)")
         st.caption("Bar: Komposisi GMV Fulfillment | Line: Rata-rata Nilai Order (BSA)")
         
@@ -4792,7 +4795,7 @@ with tab10:
             x=df_bs['Month'],
             y=df_bs['GMV (Fullfil By BS)'],
             name='Fulfilled by BS',
-            marker_color='#4CAF50' # Hijau
+            marker_color='#4CAF50'
         ))
         
         # Stacked Bar 2: GMV Non-BS
@@ -4800,39 +4803,37 @@ with tab10:
             x=df_bs['Month'],
             y=df_bs['GMV Non-BS'],
             name='Other Fulfillment',
-            marker_color='#E0E0E0' # Abu-abu
+            marker_color='#E0E0E0'
         ))
         
-        # Line Chart: BSA (Sumbu Kanan)
+        # Line Chart: BSA (Kanan)
         fig_gmv.add_trace(go.Scatter(
             x=df_bs['Month'],
             y=df_bs['BSA'],
             name='BSA (Avg Order Value)',
             mode='lines+markers',
-            line=dict(color='#2196F3', width=3), # Biru
-            yaxis='y2' # <--- KUNCI DUAL AXIS
+            line=dict(color='#2196F3', width=3),
+            yaxis='y2' # Lempar ke sumbu kanan
         ))
         
-        # Layout Config
+        # Layout Sederhana (Tanpa Font Styling yg bikin error)
         fig_gmv.update_layout(
             height=450,
             xaxis_title="Month",
-            barmode='stack', # Supaya GMV-nya numpuk
+            barmode='stack',
             
-            # Sumbu Kiri (GMV - Milyaran)
+            # Sumbu Kiri (GMV)
             yaxis=dict(
                 title="GMV Value (Rp)",
                 side="left"
             ),
             
-            # Sumbu Kanan (BSA - Ratusan Ribu)
+            # Sumbu Kanan (BSA)
             yaxis2=dict(
                 title="BSA / Avg Order (Rp)",
                 overlaying="y",
                 side="right",
-                showgrid=False,
-                titlefont=dict(color="#2196F3"),
-                tickfont=dict(color="#2196F3")
+                showgrid=False
             ),
             
             legend=dict(orientation="h", y=1.1),
@@ -4845,12 +4846,13 @@ with tab10:
         # --- 4. RAW DATA TABLE ---
         with st.expander("📋 View Detail Data"):
             df_disp = df_bs.copy()
-            # Format currency columns
             curr_cols = ['Total Order(BS)', 'GMV (Fullfil By BS)', 'GMV Total (MP)', 'Total Cost', 'BSA']
             for c in curr_cols:
-                df_disp[c] = df_disp[c].apply(lambda x: f"{x:,.0f}")
+                if c in df_disp.columns:
+                    df_disp[c] = df_disp[c].apply(lambda x: f"{x:,.0f}")
             
-            df_disp['%Cost'] = df_disp['%Cost'].apply(lambda x: f"{x:.2f}%")
+            if '%Cost' in df_disp.columns:
+                df_disp['%Cost'] = df_disp['%Cost'].apply(lambda x: f"{x:.2f}%")
             
             st.dataframe(df_disp, use_container_width=True)
 
