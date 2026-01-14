@@ -2766,14 +2766,43 @@ with tab3:
     df_inv_analysis = df_stock.copy()
     
     # --- A. Standardization Column Names ---
-    # Pastikan nama kolom sesuai request (Qty_Available -> Stock_Qty untuk konsistensi internal)
-    # Jika kolom di gsheet 'Qty_Available', kita rename ke 'Stock_Qty' agar kompatibel dengan logic visualisasi lama
+    # FIX: Tambahkan mapping untuk SKU_ID jika namanya berbeda
     col_map = {
         'Qty_Available': 'Stock_Qty',
         'Quantity_Available': 'Stock_Qty',
-        'Product_Code': 'Anchanto_Code'
+        'Product_Code': 'Anchanto_Code',
+        # Tambahkan mapping untuk kemungkinan nama lain dari SKU_ID
+        'Product_ID': 'SKU_ID',
+        'Item_Code': 'SKU_ID',
+        'Code': 'SKU_ID'
     }
-    df_inv_analysis = df_inv_analysis.rename(columns=col_map)
+    
+    # Hanya rename kolom yang ada
+    existing_columns = df_inv_analysis.columns
+    rename_dict = {}
+    
+    for old_name, new_name in col_map.items():
+        if old_name in existing_columns:
+            rename_dict[old_name] = new_name
+    
+    if rename_dict:
+        df_inv_analysis = df_inv_analysis.rename(columns=rename_dict)
+    
+    # DEBUG: Tampilkan kolom yang ada untuk memastikan
+    st.caption(f"📊 Columns in inventory data: {list(df_inv_analysis.columns)}")
+    
+    # Pastikan SKU_ID ada - jika tidak, coba kolom lain
+    if 'SKU_ID' not in df_inv_analysis.columns:
+        # Coba cari kolom yang kemungkinan berisi SKU
+        possible_sku_cols = [col for col in df_inv_analysis.columns if 'SKU' in col or 'ID' in col or 'CODE' in col]
+        if possible_sku_cols:
+            # Gunakan kolom pertama yang ditemukan sebagai SKU_ID
+            sku_col = possible_sku_cols[0]
+            df_inv_analysis = df_inv_analysis.rename(columns={sku_col: 'SKU_ID'})
+            st.info(f"ℹ️ Renamed column '{sku_col}' to 'SKU_ID'")
+        else:
+            st.error("❌ Tidak dapat menemukan kolom SKU_ID dalam data inventory!")
+            st.stop()
     
     # Pastikan Stock_Category ada (fill 'Unknown' jika kosong)
     if 'Stock_Category' not in df_inv_analysis.columns:
@@ -2797,10 +2826,6 @@ with tab3:
         df_inv_analysis['Days_Until_Expiry'] = (df_inv_analysis['Expiry_Date_Obj'] - today).dt.days
         
         # Categorize Age (Remaining Shelf Life)
-        # > 12 bulan = Fresh
-        # 6-12 bulan = Normal
-        # 3-6 bulan = Warning
-        # < 3 bulan = Critical/Clearance Candidate
         conditions = [
             df_inv_analysis['Days_Until_Expiry'] > 365,
             (df_inv_analysis['Days_Until_Expiry'] > 180) & (df_inv_analysis['Days_Until_Expiry'] <= 365),
@@ -2808,7 +2833,6 @@ with tab3:
             df_inv_analysis['Days_Until_Expiry'] <= 90
         ]
         choices = ['> 12 Months (Fresh)', '6 - 12 Months', '3 - 6 Months', '< 3 Months (Critical)']
-        # Handle NaT (No Expiry Date) -> Assumed Non-Expiring/Fresh or Unknown
         df_inv_analysis['Age_Category'] = np.select(conditions, choices, default='Unknown/No Date')
     else:
         df_inv_analysis['Age_Category'] = 'Unknown'
@@ -2820,12 +2844,28 @@ with tab3:
         sales_months = sorted(df_sales['Month'].unique())
         l3m_months = sales_months[-3:] if len(sales_months) >= 3 else sales_months
         df_sales_l3m = df_sales[df_sales['Month'].isin(l3m_months)]
-        avg_sales = df_sales_l3m.groupby('SKU_ID')['Sales_Qty'].mean().reset_index()
-        avg_sales.columns = ['SKU_ID', 'Avg_Sales_L3M']
         
-        # Merge ke Inventory
-        df_inv_analysis = pd.merge(df_inv_analysis, avg_sales, on='SKU_ID', how='left')
-        df_inv_analysis['Avg_Sales_L3M'] = df_inv_analysis['Avg_Sales_L3M'].fillna(0)
+        # DEBUG: Pastikan df_sales_l3m memiliki kolom SKU_ID
+        if 'SKU_ID' in df_sales_l3m.columns:
+            avg_sales = df_sales_l3m.groupby('SKU_ID')['Sales_Qty'].mean().reset_index()
+            avg_sales.columns = ['SKU_ID', 'Avg_Sales_L3M']
+            
+            # DEBUG: Cek data sebelum merge
+            st.caption(f"📊 Avg sales data shape: {avg_sales.shape}")
+            st.caption(f"📊 Inventory data SKU_ID sample: {df_inv_analysis['SKU_ID'].head(5).tolist()}")
+            
+            # Merge ke Inventory - FIX: gunakan how='left' dan validasi kolom
+            df_inv_analysis = pd.merge(
+                df_inv_analysis, 
+                avg_sales, 
+                on='SKU_ID', 
+                how='left',
+                validate='one_to_one'  # Optional: validasi relationship
+            )
+            df_inv_analysis['Avg_Sales_L3M'] = df_inv_analysis['Avg_Sales_L3M'].fillna(0)
+        else:
+            st.warning("⚠️ Sales data tidak memiliki kolom SKU_ID")
+            df_inv_analysis['Avg_Sales_L3M'] = 0
     else:
         df_inv_analysis['Avg_Sales_L3M'] = 0
 
@@ -2837,26 +2877,40 @@ with tab3:
     )
 
     # --- D. Merge Product Info (Price, Brand, Name) ---
-    # Jika Product Name/Brand belum ada di stock sheet, ambil dari Master
-    cols_to_add = []
-    if 'Product_Name' not in df_inv_analysis.columns: cols_to_add.append('Product_Name')
-    if 'Brand' not in df_inv_analysis.columns: cols_to_add.append('Brand')
+    # DEBUG: Cek kolom yang ada di df_inv_analysis sebelum merge
+    st.caption(f"📊 Columns before product merge: {list(df_inv_analysis.columns)}")
     
     # Selalu ambil harga untuk kalkulasi value
-    cols_to_add.extend(['Floor_Price', 'Net_Order_Price']) 
-    
-    # Bersihkan duplikat kolom kalau mau merge
+    cols_to_add = ['Product_Name', 'Brand', 'Floor_Price', 'Net_Order_Price']
     cols_to_add = [c for c in cols_to_add if c in df_product.columns]
     
-    if cols_to_add:
-        df_inv_analysis = pd.merge(df_inv_analysis, df_product[['SKU_ID'] + cols_to_add], on='SKU_ID', how='left', suffixes=('', '_master'))
+    if cols_to_add and 'SKU_ID' in df_inv_analysis.columns:
+        # Pastikan tidak ada duplikat kolom
+        existing_cols = set(df_inv_analysis.columns)
+        cols_to_add_filtered = [c for c in cols_to_add if c not in existing_cols or c == 'SKU_ID']
         
-        # Fill Value
-        if 'Floor_Price' in df_inv_analysis.columns:
-            df_inv_analysis['Stock_Value'] = df_inv_analysis['Stock_Qty'] * df_inv_analysis['Floor_Price'].fillna(0)
-        else:
-            df_inv_analysis['Stock_Value'] = 0
+        if cols_to_add_filtered:
+            merge_cols = ['SKU_ID'] + [c for c in cols_to_add_filtered if c != 'SKU_ID']
+            df_inv_analysis = pd.merge(
+                df_inv_analysis, 
+                df_product[merge_cols], 
+                on='SKU_ID', 
+                how='left',
+                suffixes=('', '_product')
+            )
+            
+            # Fill Value
+            if 'Floor_Price' in df_inv_analysis.columns:
+                df_inv_analysis['Stock_Value'] = df_inv_analysis['Stock_Qty'] * df_inv_analysis['Floor_Price'].fillna(0)
+            else:
+                df_inv_analysis['Stock_Value'] = 0
+    else:
+        df_inv_analysis['Stock_Value'] = 0
 
+    # DEBUG: Tampilkan hasil akhir
+    st.caption(f"📊 Final inventory data shape: {df_inv_analysis.shape}")
+    st.caption(f"📊 Final columns: {list(df_inv_analysis.columns)}")
+    
     # ========================================================
     # 2. DASHBOARD CONTROLS (FILTER)
     # ========================================================
