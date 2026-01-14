@@ -326,63 +326,83 @@ def add_product_info_to_data(df, df_product):
 
 @st.cache_data(ttl=300, max_entries=3, show_spinner=False)
 def load_and_process_data(_client):
-    """Load dan proses semua data (Original Logic + Fix khusus Stock_Onhand)"""
+    """
+    Load dan proses semua data. 
+    FIX: Stock_Onhand dibaca manual (get_all_values) untuk menangani header duplikat/kosong.
+    Sheet lain dibaca standar (get_all_records).
+    """
     
     gsheet_url = st.secrets["gsheet_url"]
     data = {}
-    
+
+    # --- HELPER KHUSUS STOCK (BACA MANUAL) ---
+    def safe_read_stock_sheet(sheet_name):
+        try:
+            ws = _client.open_by_url(gsheet_url).worksheet(sheet_name)
+            raw_data = ws.get_all_values()
+            
+            if len(raw_data) < 2: return pd.DataFrame()
+            
+            # Header baris 1, Data baris 2 dst
+            headers = [str(h).strip() for h in raw_data[0]]
+            df = pd.DataFrame(raw_data[1:], columns=headers)
+            
+            # Hapus kolom tanpa nama (penyebab error duplicate header)
+            df = df.loc[:, df.columns != '']
+            return df
+        except Exception as e:
+            st.warning(f"Gagal membaca sheet {sheet_name}: {e}")
+            return pd.DataFrame()
+
     try:
-        # 1. PRODUCT MASTER (Original Logic)
-        ws = _client.open_by_url(gsheet_url).worksheet("Product_Master")
-        df_product = pd.DataFrame(ws.get_all_records())
+        # 1. PRODUCT MASTER (Standard Load)
+        ws_prod = _client.open_by_url(gsheet_url).worksheet("Product_Master")
+        df_product = pd.DataFrame(ws_prod.get_all_records())
         df_product.columns = [col.strip().replace(' ', '_') for col in df_product.columns]
         
-        # Validate price columns
+        # Validate prices
         if 'Floor_Price' in df_product.columns:
             df_product['Floor_Price'] = pd.to_numeric(df_product['Floor_Price'], errors='coerce').fillna(0)
         if 'Net_Order_Price' in df_product.columns:
             df_product['Net_Order_Price'] = pd.to_numeric(df_product['Net_Order_Price'], errors='coerce').fillna(0)
         
-        # Ensure Status column
-        if 'Status' not in df_product.columns:
-            df_product['Status'] = 'Active'
-        
+        if 'Status' not in df_product.columns: df_product['Status'] = 'Active'
         df_product_active = df_product[df_product['Status'].str.upper() == 'ACTIVE'].copy()
         active_skus = df_product_active['SKU_ID'].tolist()
         
-        # 2. SALES DATA (Original Logic)
+        data['product'] = df_product
+        data['product_active'] = df_product_active
+
+        # 2. SALES DATA (Standard Load)
         ws_sales = _client.open_by_url(gsheet_url).worksheet("Sales")
         df_sales_raw = pd.DataFrame(ws_sales.get_all_records())
         df_sales_raw.columns = [col.strip() for col in df_sales_raw.columns]
         
-        month_cols = [col for col in df_sales_raw.columns if any(m in col.upper() for m in ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'])]
+        month_cols = [c for c in df_sales_raw.columns if any(m in c.upper() for m in ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'])]
         
         if month_cols and 'SKU_ID' in df_sales_raw.columns:
             id_cols = ['SKU_ID']
             for col in ['SKU_Name', 'Product_Name', 'Brand', 'SKU_Tier']:
-                if col in df_sales_raw.columns:
-                    id_cols.append(col)
+                if col in df_sales_raw.columns: id_cols.append(col)
             
             df_sales_long = df_sales_raw.melt(id_vars=id_cols, value_vars=month_cols, var_name='Month_Label', value_name='Sales_Qty')
             df_sales_long['Sales_Qty'] = pd.to_numeric(df_sales_long['Sales_Qty'], errors='coerce').fillna(0)
             df_sales_long['Month'] = df_sales_long['Month_Label'].apply(validate_month_format)
             df_sales_long = df_sales_long[df_sales_long['SKU_ID'].isin(active_skus)]
             df_sales_long = add_product_info_to_data(df_sales_long, df_product)
-            df_sales_long = df_sales_long.sort_values('Month')
-            data['sales'] = df_sales_long
-        
-        # 3. ROFO DATA (Original Logic)
+            data['sales'] = df_sales_long.sort_values('Month')
+
+        # 3. ROFO DATA (Standard Load)
         ws_rofo = _client.open_by_url(gsheet_url).worksheet("Rofo")
         df_rofo_raw = pd.DataFrame(ws_rofo.get_all_records())
         df_rofo_raw.columns = [col.strip() for col in df_rofo_raw.columns]
         
-        month_cols_rofo = [col for col in df_rofo_raw.columns if any(m in col.upper() for m in ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'])]
+        month_cols_rofo = [c for c in df_rofo_raw.columns if any(m in c.upper() for m in ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'])]
         
         if month_cols_rofo:
             id_cols_rofo = ['SKU_ID']
             for col in ['Product_Name', 'Brand']:
-                if col in df_rofo_raw.columns:
-                    id_cols_rofo.append(col)
+                if col in df_rofo_raw.columns: id_cols_rofo.append(col)
             
             df_rofo_long = df_rofo_raw.melt(id_vars=id_cols_rofo, value_vars=month_cols_rofo, var_name='Month_Label', value_name='Forecast_Qty')
             df_rofo_long['Forecast_Qty'] = pd.to_numeric(df_rofo_long['Forecast_Qty'], errors='coerce').fillna(0)
@@ -390,13 +410,13 @@ def load_and_process_data(_client):
             df_rofo_long = df_rofo_long[df_rofo_long['SKU_ID'].isin(active_skus)]
             df_rofo_long = add_product_info_to_data(df_rofo_long, df_product)
             data['forecast'] = df_rofo_long
-        
-        # 4. PO DATA (Original Logic)
+
+        # 4. PO DATA (Standard Load)
         ws_po = _client.open_by_url(gsheet_url).worksheet("PO")
         df_po_raw = pd.DataFrame(ws_po.get_all_records())
         df_po_raw.columns = [col.strip() for col in df_po_raw.columns]
         
-        month_cols_po = [col for col in df_po_raw.columns if any(m in col.upper() for m in ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'])]
+        month_cols_po = [c for c in df_po_raw.columns if any(m in c.upper() for m in ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'])]
         
         if month_cols_po and 'SKU_ID' in df_po_raw.columns:
             df_po_long = df_po_raw.melt(id_vars=['SKU_ID'], value_vars=month_cols_po, var_name='Month_Label', value_name='PO_Qty')
@@ -405,142 +425,102 @@ def load_and_process_data(_client):
             df_po_long = df_po_long[df_po_long['SKU_ID'].isin(active_skus)]
             df_po_long = add_product_info_to_data(df_po_long, df_product)
             data['po'] = df_po_long
+
+        # ==============================================================================
+        # 5. STOCK DATA (KHUSUS: SAFE LOAD UNTUK MENGATASI ERROR HEADER)
+        # ==============================================================================
+        # Kita pakai helper safe_read_stock_sheet yang kita buat di atas
+        df_stock_raw = safe_read_stock_sheet("Stock_Onhand")
         
-        # 5. STOCK DATA (FIXED & ROBUST)
-        ws_stock = _client.open_by_url(gsheet_url).worksheet("Stock_Onhand")
-        
-        # Gunakan get_all_values() agar kita bisa handle header secara manual (Anti-Error Duplicate)
-        raw_stock_data = ws_stock.get_all_values()
-        
-        if len(raw_stock_data) > 1:
-            # 1. Ambil Header & Bersihkan Spasi (Tanpa mengubah jadi underscore)
-            headers = [str(h).strip() for h in raw_stock_data[0]]
-            
-            # 2. Buat DataFrame
-            df_stock_raw = pd.DataFrame(raw_stock_data[1:], columns=headers)
-            
-            # 3. Buang kolom hantu (header kosong)
-            df_stock_raw = df_stock_raw.loc[:, df_stock_raw.columns != '']
-            
-            # 4. Definisikan Target Kolom (Apa nama di GSheet -> Apa nama di System)
+        if not df_stock_raw.empty:
+            # Mapping Kolom sesuai Header GSheet Bapak
             col_mapping = {
                 'SKU_ID': 'SKU_ID',
-                'Qty_Available': 'Stock_Qty',    # <--- INI KUNCINYA
-                'Product_Code': 'Anchanto_Code',
+                'Qty_Available': 'Stock_Qty',    # Target Rename
+                'Product_Code': 'Anchanto_Code', # Target Rename
                 'Stock_Category': 'Stock_Category',
                 'Expiry_Date': 'Expiry_Date',
-                'Product_Name': 'Product_Name',
-                'Brand': 'Brand'
+                'Product_Name': 'Product_Name'
             }
             
-            # 5. Cek apakah kolom kunci (SKU_ID & Qty) tersedia
+            # Cek apakah kolom kunci ada (SKU_ID & Qty_Available)
             if 'SKU_ID' in df_stock_raw.columns and 'Qty_Available' in df_stock_raw.columns:
-                
-                # Ambil hanya kolom yang ada di mapping
+                # Ambil hanya kolom yang ada di mapping untuk kebersihan
                 cols_to_use = [c for c in col_mapping.keys() if c in df_stock_raw.columns]
                 df_stock = df_stock_raw[cols_to_use].copy()
                 
-                # Rename kolom ke standar sistem ('Stock_Qty', dll)
+                # Rename ke standar sistem
                 df_stock = df_stock.rename(columns=col_mapping)
                 
-                # Bersihkan data angka & string
+                # Bersihkan data
                 df_stock['Stock_Qty'] = pd.to_numeric(df_stock['Stock_Qty'], errors='coerce').fillna(0)
                 df_stock['SKU_ID'] = df_stock['SKU_ID'].astype(str).str.strip()
                 
-                # Filter SKU yang aktif saja (Opsional, matikan jika ingin lihat semua stok)
-                df_stock = df_stock[df_stock['SKU_ID'].isin(active_skus)]
-                
-                # Lookup Harga dari Product Master (Penting untuk Valuasi di Tab 3)
+                # Merge Harga dari Product Master (Penting untuk Valuasi Tab 3)
                 cols_price = ['Floor_Price', 'Net_Order_Price']
                 cols_price = [c for c in cols_price if c in df_product.columns]
-                
-                # Lakukan merge harga jika kolom harga belum ada di data stock
                 if cols_price:
-                     # Hapus kolom harga jika kebetulan sudah ada di stock agar tidak duplikat saat merge
-                    cols_to_merge = [c for c in cols_price if c not in df_stock.columns]
-                    if cols_to_merge:
-                        df_stock = pd.merge(df_stock, df_product[['SKU_ID'] + cols_to_merge], on='SKU_ID', how='left')
+                    df_stock = pd.merge(df_stock, df_product[['SKU_ID'] + cols_price], on='SKU_ID', how='left')
 
                 data['stock'] = df_stock
             else:
-                # Fallback jika nama kolom di GSheet berubah lagi
-                st.warning(f"⚠️ Kolom 'SKU_ID' atau 'Qty_Available' tidak ditemukan di Stock_Onhand. Header terbaca: {list(df_stock_raw.columns)}")
+                st.warning("⚠️ Kolom 'SKU_ID' atau 'Qty_Available' tidak ditemukan di Stock_Onhand.")
                 data['stock'] = pd.DataFrame(columns=['SKU_ID', 'Stock_Qty'])
         else:
             data['stock'] = pd.DataFrame(columns=['SKU_ID', 'Stock_Qty'])
 
-        # 6. FORECAST 2026 ECOMM (Original Logic)
+        # 6. FORECAST 2026 ECOMM (Standard Load)
         try:
-            ws_ecomm_forecast = _client.open_by_url(gsheet_url).worksheet("Forecast_2026_Ecomm")
-            df_ecomm_forecast_raw = pd.DataFrame(ws_ecomm_forecast.get_all_records())
-            df_ecomm_forecast_raw.columns = [col.strip().replace(' ', '_') for col in df_ecomm_forecast_raw.columns]
+            ws_ecomm = _client.open_by_url(gsheet_url).worksheet("Forecast_2026_Ecomm")
+            df_ecomm_raw = pd.DataFrame(ws_ecomm.get_all_records())
+            df_ecomm_raw.columns = [col.strip().replace(' ', '_') for col in df_ecomm_raw.columns]
             
-            month_cols_ecomm = []
-            for col in df_ecomm_forecast_raw.columns:
-                if any(m in col.upper() for m in ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']):
-                    month_cols_ecomm.append(col)
-            
+            month_cols_ecomm = [c for c in df_ecomm_raw.columns if any(m in c.upper() for m in ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'])]
             for col in month_cols_ecomm:
-                df_ecomm_forecast_raw[col] = pd.to_numeric(df_ecomm_forecast_raw[col], errors='coerce').fillna(0)
+                df_ecomm_raw[col] = pd.to_numeric(df_ecomm_raw[col], errors='coerce').fillna(0)
             
-            data['ecomm_forecast'] = df_ecomm_forecast_raw
+            data['ecomm_forecast'] = df_ecomm_raw
             data['ecomm_forecast_month_cols'] = month_cols_ecomm
-            
-        except Exception as e:
+        except:
             data['ecomm_forecast'] = pd.DataFrame()
             data['ecomm_forecast_month_cols'] = []
-        
-        # 7. FORECAST 2026 RESELLER (Original Logic)
+
+        # 7. FORECAST 2026 RESELLER (Standard Load)
         try:
-            ws_reseller_forecast = _client.open_by_url(gsheet_url).worksheet("Forecast_2026_Reseller")
-            df_reseller_forecast_raw = pd.DataFrame(ws_reseller_forecast.get_all_records())
-            df_reseller_forecast_raw.columns = [col.strip().replace(' ', '_') for col in df_reseller_forecast_raw.columns]
+            ws_reseller = _client.open_by_url(gsheet_url).worksheet("Forecast_2026_Reseller")
+            df_reseller_raw = pd.DataFrame(ws_reseller.get_all_records())
+            df_reseller_raw.columns = [col.strip().replace(' ', '_') for col in df_reseller_raw.columns]
             
-            all_month_cols_reseller = []
-            for col in df_reseller_forecast_raw.columns:
-                if any(m in col.upper() for m in ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']):
-                    all_month_cols_reseller.append(col)
-            
-            for col in all_month_cols_reseller:
-                df_reseller_forecast_raw[col] = pd.to_numeric(df_reseller_forecast_raw[col], errors='coerce').fillna(0)
+            all_month_cols_res = [c for c in df_reseller_raw.columns if any(m in c.upper() for m in ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'])]
+            for col in all_month_cols_res:
+                df_reseller_raw[col] = pd.to_numeric(df_reseller_raw[col], errors='coerce').fillna(0)
             
             forecast_start_date = datetime(2026, 1, 1)
-            
             def is_forecast_month(month_str):
                 try:
-                    month_str = str(month_str).upper()
-                    if '-' in month_str:
-                        month_part, year_part = month_str.split('-')
+                    month_str = str(month_str).upper().replace('_', ' ').replace('-', ' ')
+                    if ' ' in month_str:
+                        month_part, year_part = month_str.split(' ')
                         month_num = datetime.strptime(month_part[:3], '%b').month
-                        year = 2000 + int(year_part) if len(year_part) == 2 else int(year_part)
-                        month_date = datetime(year, month_num, 1)
-                        return month_date >= forecast_start_date
-                except:
-                    return False
+                        year_clean = ''.join(filter(str.isdigit, year_part))
+                        year = 2000 + int(year_clean) if len(year_clean) == 2 else int(year_clean)
+                        return datetime(year, month_num, 1) >= forecast_start_date
+                except: return False
                 return False
             
-            historical_cols = []
-            forecast_cols = []
-            for col in all_month_cols_reseller:
-                if is_forecast_month(col):
-                    forecast_cols.append(col)
-                else:
-                    historical_cols.append(col)
+            hist_cols = [c for c in all_month_cols_res if not is_forecast_month(c)]
+            fcst_cols = [c for c in all_month_cols_res if is_forecast_month(c)]
             
-            data['reseller_forecast'] = df_reseller_forecast_raw
-            data['reseller_all_month_cols'] = all_month_cols_reseller
-            data['reseller_historical_cols'] = historical_cols
-            data['reseller_forecast_cols'] = forecast_cols
-            
-        except Exception as e:
+            data['reseller_forecast'] = df_reseller_raw
+            data['reseller_all_month_cols'] = all_month_cols_res
+            data['reseller_historical_cols'] = hist_cols
+            data['reseller_forecast_cols'] = fcst_cols
+        except:
             data['reseller_forecast'] = pd.DataFrame()
             data['reseller_all_month_cols'] = []
             data['reseller_historical_cols'] = []
             data['reseller_forecast_cols'] = []
-        
-        data['product'] = df_product
-        data['product_active'] = df_product_active
-        
+
         return data
         
     except Exception as e:
