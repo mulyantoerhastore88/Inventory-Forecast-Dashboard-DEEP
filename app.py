@@ -2762,19 +2762,20 @@ with tab3:
     # 1. DATA PREPARATION & ENRICHMENT (KHUSUS TAB 3)
     # ========================================================
     
+    # DEBUG: Tampilkan info tentang data stock
+    st.caption(f"📊 Raw stock data columns: {list(df_stock.columns)}")
+    
     # Ambil data stock raw
     df_inv_analysis = df_stock.copy()
     
     # --- A. Standardization Column Names ---
-    # FIX: Tambahkan mapping untuk SKU_ID jika namanya berbeda
+    # FIXED: Tetap gunakan SKU_ID, tapi handle kemungkinan nama berbeda
     col_map = {
         'Qty_Available': 'Stock_Qty',
         'Quantity_Available': 'Stock_Qty',
-        'Product_Code': 'Anchanto_Code',
-        # Tambahkan mapping untuk kemungkinan nama lain dari SKU_ID
-        'Product_ID': 'SKU_ID',
-        'Item_Code': 'SKU_ID',
-        'Code': 'SKU_ID'
+        'Physical_Stock': 'Stock_Qty',
+        'Free_Stock': 'Stock_Qty',
+        # Tidak perlu rename SKU_ID karena sudah ada
     }
     
     # Hanya rename kolom yang ada
@@ -2787,45 +2788,96 @@ with tab3:
     
     if rename_dict:
         df_inv_analysis = df_inv_analysis.rename(columns=rename_dict)
+        st.success(f"✅ Renamed columns: {rename_dict}")
     
-    # DEBUG: Tampilkan kolom yang ada untuk memastikan
-    st.caption(f"📊 Columns in inventory data: {list(df_inv_analysis.columns)}")
-    
-    # Pastikan SKU_ID ada - jika tidak, coba kolom lain
+    # --- B. Handle SKU_ID yang berisi rumus ---
+    # KOLOM SKU_ID ADA di data Anda, tapi mungkin berisi rumus/formula
     if 'SKU_ID' not in df_inv_analysis.columns:
-        # Coba cari kolom yang kemungkinan berisi SKU
-        possible_sku_cols = [col for col in df_inv_analysis.columns if 'SKU' in col or 'ID' in col or 'CODE' in col]
-        if possible_sku_cols:
-            # Gunakan kolom pertama yang ditemukan sebagai SKU_ID
-            sku_col = possible_sku_cols[0]
+        # Cari kolom lain dengan nama mirip SKU
+        sku_col_candidates = [col for col in df_inv_analysis.columns if 'sku' in col.lower() or 'id' in col.lower()]
+        if sku_col_candidates:
+            # Gunakan kolom pertama yang ditemukan
+            sku_col = sku_col_candidates[0]
             df_inv_analysis = df_inv_analysis.rename(columns={sku_col: 'SKU_ID'})
-            st.info(f"ℹ️ Renamed column '{sku_col}' to 'SKU_ID'")
+            st.info(f"ℹ️ Renamed '{sku_col}' to 'SKU_ID'")
         else:
-            st.error("❌ Tidak dapat menemukan kolom SKU_ID dalam data inventory!")
+            st.error("❌ Kolom SKU_ID tidak ditemukan dalam data inventory!")
+            st.dataframe(df_inv_analysis.head())  # Debug: tampilkan data
             st.stop()
     
-    # Pastikan Stock_Category ada (fill 'Unknown' jika kosong)
+    # --- C. Clean SKU_ID yang mungkin berisi rumus/NaN ---
+    st.info("🔄 Cleaning SKU_ID data (may contain formulas from Google Sheets)...")
+    
+    # Konversi ke string dan bersihkan
+    df_inv_analysis['SKU_ID'] = df_inv_analysis['SKU_ID'].astype(str)
+    
+    # Bersihkan karakter aneh dan whitespace
+    df_inv_analysis['SKU_ID'] = df_inv_analysis['SKU_ID'].str.strip()
+    
+    # Identifikasi SKU_ID yang bermasalah (mungkin rumus)
+    problem_skus = df_inv_analysis[df_inv_analysis['SKU_ID'].str.contains('=|#|!|@', na=False)]['SKU_ID'].unique()
+    if len(problem_skus) > 0:
+        st.warning(f"⚠️ Found {len(problem_skus)} SKU_IDs that may contain formulas: {problem_skus[:5]}")
+        # Coba extract hanya bagian angka/huruf
+        df_inv_analysis['SKU_ID'] = df_inv_analysis['SKU_ID'].str.replace(r'[^a-zA-Z0-9_-]', '', regex=True)
+    
+    # Filter out invalid SKU_IDs
+    initial_count = len(df_inv_analysis)
+    df_inv_analysis = df_inv_analysis[
+        ~df_inv_analysis['SKU_ID'].isin(['nan', 'NaN', 'None', 'NULL', '', ' ', None]) &
+        (df_inv_analysis['SKU_ID'].str.len() > 0)
+    ]
+    filtered_count = len(df_inv_analysis)
+    
+    st.success(f"✅ Cleaned SKU_ID: {filtered_count} valid SKUs (removed {initial_count - filtered_count} invalid)")
+    
+    # Tampilkan sample SKU_IDs
+    st.caption(f"📊 Sample SKU_IDs after cleaning: {df_inv_analysis['SKU_ID'].head(10).tolist()}")
+    
+    # --- D. Handle Quantity Column ---
+    if 'Stock_Qty' not in df_inv_analysis.columns:
+        # Cari kolom quantity
+        qty_cols = [col for col in df_inv_analysis.columns if any(x in col.lower() for x in ['qty', 'quantity', 'stock'])]
+        if qty_cols:
+            qty_col = qty_cols[0]
+            df_inv_analysis['Stock_Qty'] = pd.to_numeric(df_inv_analysis[qty_col], errors='coerce').fillna(0)
+            st.info(f"ℹ️ Using '{qty_col}' as Stock_Qty")
+        else:
+            st.error("❌ Tidak dapat menemukan kolom quantity!")
+            st.stop()
+    else:
+        df_inv_analysis['Stock_Qty'] = pd.to_numeric(df_inv_analysis['Stock_Qty'], errors='coerce').fillna(0)
+    
+    # --- E. Stock Category ---
     if 'Stock_Category' not in df_inv_analysis.columns:
-        df_inv_analysis['Stock_Category'] = 'SKU Regular' # Default fallback
+        df_inv_analysis['Stock_Category'] = 'SKU Regular'
+        st.info("ℹ️ Added default Stock_Category: 'SKU Regular'")
     else:
         df_inv_analysis['Stock_Category'] = df_inv_analysis['Stock_Category'].fillna('Unknown')
-
-    # --- B. Expiry Date Processing (dd/mm/yyyy) ---
+    
+    # --- F. Expiry Date Processing ---
     def process_expiry(date_str):
         try:
-            # Handle format dd/mm/yyyy
-            return pd.to_datetime(date_str, format='%d/%m/%Y', errors='coerce')
+            if pd.isna(date_str) or str(date_str).strip() == '':
+                return pd.NaT
+            # Handle multiple date formats
+            for fmt in ['%d/%m/%Y', '%Y-%m-%d', '%d-%b-%Y', '%d %b %Y']:
+                try:
+                    return pd.to_datetime(date_str, format=fmt, errors='raise')
+                except:
+                    continue
+            return pd.NaT
         except:
             return pd.NaT
-
+    
     if 'Expiry_Date' in df_inv_analysis.columns:
         df_inv_analysis['Expiry_Date_Obj'] = df_inv_analysis['Expiry_Date'].apply(process_expiry)
         
-        # Hitung Shelf Life (Hari menuju expired)
+        # Calculate days until expiry
         today = pd.Timestamp.now()
         df_inv_analysis['Days_Until_Expiry'] = (df_inv_analysis['Expiry_Date_Obj'] - today).dt.days
         
-        # Categorize Age (Remaining Shelf Life)
+        # Categorize Age
         conditions = [
             df_inv_analysis['Days_Until_Expiry'] > 365,
             (df_inv_analysis['Days_Until_Expiry'] > 180) & (df_inv_analysis['Days_Until_Expiry'] <= 365),
@@ -2834,262 +2886,274 @@ with tab3:
         ]
         choices = ['> 12 Months (Fresh)', '6 - 12 Months', '3 - 6 Months', '< 3 Months (Critical)']
         df_inv_analysis['Age_Category'] = np.select(conditions, choices, default='Unknown/No Date')
+        
+        expiry_count = df_inv_analysis['Expiry_Date_Obj'].notna().sum()
+        st.info(f"ℹ️ Found {expiry_count} items with valid expiry dates")
     else:
         df_inv_analysis['Age_Category'] = 'Unknown'
         df_inv_analysis['Expiry_Date_Obj'] = pd.NaT
-
-    # --- C. Merge with Sales Data (L3M Avg) ---
-    # Hitung Avg Sales 3 Bulan Terakhir
-    if not df_sales.empty:
-        sales_months = sorted(df_sales['Month'].unique())
-        l3m_months = sales_months[-3:] if len(sales_months) >= 3 else sales_months
-        df_sales_l3m = df_sales[df_sales['Month'].isin(l3m_months)]
+        df_inv_analysis['Days_Until_Expiry'] = None
+        st.info("ℹ️ No expiry date data available")
+    
+    # --- G. Merge with Sales Data (L3M Avg) ---
+    # DEBUG: Show sales data info
+    st.caption(f"📊 Sales data shape: {df_sales.shape if not df_sales.empty else 'Empty'}")
+    
+    if not df_sales.empty and 'SKU_ID' in df_sales.columns:
+        # Clean SKU_ID in sales data too
+        df_sales_clean = df_sales.copy()
+        df_sales_clean['SKU_ID'] = df_sales_clean['SKU_ID'].astype(str).str.strip()
         
-        # DEBUG: Pastikan df_sales_l3m memiliki kolom SKU_ID
-        if 'SKU_ID' in df_sales_l3m.columns:
+        # Get last 3 months sales
+        sales_months = sorted(df_sales_clean['Month'].unique())
+        l3m_months = sales_months[-3:] if len(sales_months) >= 3 else sales_months
+        df_sales_l3m = df_sales_clean[df_sales_clean['Month'].isin(l3m_months)]
+        
+        if not df_sales_l3m.empty:
+            # Calculate average monthly sales per SKU
             avg_sales = df_sales_l3m.groupby('SKU_ID')['Sales_Qty'].mean().reset_index()
             avg_sales.columns = ['SKU_ID', 'Avg_Sales_L3M']
             
-            # DEBUG: Cek data sebelum merge
-            st.caption(f"📊 Avg sales data shape: {avg_sales.shape}")
-            st.caption(f"📊 Inventory data SKU_ID sample: {df_inv_analysis['SKU_ID'].head(5).tolist()}")
+            # DEBUG: Show merge info
+            inventory_skus = set(df_inv_analysis['SKU_ID'].unique())
+            sales_skus = set(avg_sales['SKU_ID'].unique())
+            common_skus = inventory_skus.intersection(sales_skus)
             
-            # Merge ke Inventory - FIX: gunakan how='left' dan validasi kolom
+            st.info(f"ℹ️ Inventory SKUs: {len(inventory_skus)}, Sales SKUs: {len(sales_skus)}, Common: {len(common_skus)}")
+            
+            # Perform merge
+            before_merge = len(df_inv_analysis)
             df_inv_analysis = pd.merge(
-                df_inv_analysis, 
-                avg_sales, 
-                on='SKU_ID', 
-                how='left',
-                validate='one_to_one'  # Optional: validasi relationship
+                df_inv_analysis,
+                avg_sales,
+                on='SKU_ID',
+                how='left'
             )
+            after_merge = len(df_inv_analysis)
+            
             df_inv_analysis['Avg_Sales_L3M'] = df_inv_analysis['Avg_Sales_L3M'].fillna(0)
+            
+            # Calculate cover months
+            df_inv_analysis['Cover_Months'] = np.where(
+                df_inv_analysis['Avg_Sales_L3M'] > 0,
+                df_inv_analysis['Stock_Qty'] / df_inv_analysis['Avg_Sales_L3M'],
+                999  # No sales
+            )
+            
+            st.success(f"✅ Merged sales data: {after_merge} items, {len(common_skus)} with sales history")
         else:
-            st.warning("⚠️ Sales data tidak memiliki kolom SKU_ID")
             df_inv_analysis['Avg_Sales_L3M'] = 0
+            df_inv_analysis['Cover_Months'] = 999
+            st.warning("⚠️ No sales data for last 3 months")
     else:
         df_inv_analysis['Avg_Sales_L3M'] = 0
-
-    # Hitung Cover Month
-    df_inv_analysis['Cover_Months'] = np.where(
-        df_inv_analysis['Avg_Sales_L3M'] > 0,
-        df_inv_analysis['Stock_Qty'] / df_inv_analysis['Avg_Sales_L3M'],
-        999 # Infinite cover (No Sales)
-    )
-
-    # --- D. Merge Product Info (Price, Brand, Name) ---
-    # DEBUG: Cek kolom yang ada di df_inv_analysis sebelum merge
-    st.caption(f"📊 Columns before product merge: {list(df_inv_analysis.columns)}")
+        df_inv_analysis['Cover_Months'] = 999
+        st.warning("⚠️ No sales data available for merge")
     
-    # Selalu ambil harga untuk kalkulasi value
-    cols_to_add = ['Product_Name', 'Brand', 'Floor_Price', 'Net_Order_Price']
-    cols_to_add = [c for c in cols_to_add if c in df_product.columns]
-    
-    if cols_to_add and 'SKU_ID' in df_inv_analysis.columns:
-        # Pastikan tidak ada duplikat kolom
-        existing_cols = set(df_inv_analysis.columns)
-        cols_to_add_filtered = [c for c in cols_to_add if c not in existing_cols or c == 'SKU_ID']
+    # --- H. Merge Product Info ---
+    if 'SKU_ID' in df_product.columns:
+        # Clean product data SKU_ID
+        df_product_clean = df_product.copy()
+        df_product_clean['SKU_ID'] = df_product_clean['SKU_ID'].astype(str).str.strip()
         
-        if cols_to_add_filtered:
-            merge_cols = ['SKU_ID'] + [c for c in cols_to_add_filtered if c != 'SKU_ID']
+        # Get columns to merge
+        product_cols = ['Product_Name', 'Brand', 'SKU_Tier', 'Floor_Price', 'Net_Order_Price']
+        product_cols = [col for col in product_cols if col in df_product_clean.columns]
+        
+        if product_cols:
+            before_merge = len(df_inv_analysis)
             df_inv_analysis = pd.merge(
-                df_inv_analysis, 
-                df_product[merge_cols], 
-                on='SKU_ID', 
-                how='left',
-                suffixes=('', '_product')
+                df_inv_analysis,
+                df_product_clean[['SKU_ID'] + product_cols],
+                on='SKU_ID',
+                how='left'
             )
             
-            # Fill Value
+            # Calculate stock value if price available
             if 'Floor_Price' in df_inv_analysis.columns:
-                df_inv_analysis['Stock_Value'] = df_inv_analysis['Stock_Qty'] * df_inv_analysis['Floor_Price'].fillna(0)
+                df_inv_analysis['Floor_Price'] = pd.to_numeric(df_inv_analysis['Floor_Price'], errors='coerce').fillna(0)
+                df_inv_analysis['Stock_Value'] = df_inv_analysis['Stock_Qty'] * df_inv_analysis['Floor_Price']
             else:
                 df_inv_analysis['Stock_Value'] = 0
+            
+            matched = df_inv_analysis['Product_Name'].notna().sum()
+            st.success(f"✅ Merged product info: {matched}/{len(df_inv_analysis)} items matched")
+        else:
+            df_inv_analysis['Stock_Value'] = 0
+            st.warning("⚠️ No product info columns available for merge")
     else:
         df_inv_analysis['Stock_Value'] = 0
-
-    # DEBUG: Tampilkan hasil akhir
+        st.warning("⚠️ SKU_ID not in product data")
+    
+    # DEBUG: Final data check
     st.caption(f"📊 Final inventory data shape: {df_inv_analysis.shape}")
-    st.caption(f"📊 Final columns: {list(df_inv_analysis.columns)}")
+    if not df_inv_analysis.empty:
+        st.caption(f"📊 Sample: SKU: {df_inv_analysis.iloc[0]['SKU_ID']}, Qty: {df_inv_analysis.iloc[0]['Stock_Qty']}")
     
     # ========================================================
     # 2. DASHBOARD CONTROLS (FILTER)
     # ========================================================
     
-    col_filter1, col_filter2, col_filter3 = st.columns(3)
-    
-    with col_filter1:
-        # Filter Stock Category (Requirement 1)
-        avail_cats = df_inv_analysis['Stock_Category'].unique().tolist()
-        sel_cats = st.multiselect("📂 Filter Stock Category", options=avail_cats, default=avail_cats)
+    if not df_inv_analysis.empty:
+        col_filter1, col_filter2, col_filter3 = st.columns(3)
         
-    with col_filter2:
-        # Filter Brand
-        avail_brands = df_inv_analysis['Brand'].unique().tolist() if 'Brand' in df_inv_analysis.columns else []
-        sel_brands = st.multiselect("🏷️ Filter Brand", options=avail_brands, default=avail_brands)
+        with col_filter1:
+            # Filter Stock Category
+            if 'Stock_Category' in df_inv_analysis.columns:
+                avail_cats = df_inv_analysis['Stock_Category'].unique().tolist()
+                sel_cats = st.multiselect("📂 Filter Stock Category", options=avail_cats, default=avail_cats)
+            else:
+                sel_cats = []
+                st.info("No Stock Category data")
         
-    with col_filter3:
-        # Filter Age
-        avail_ages = sorted(df_inv_analysis['Age_Category'].unique().tolist())
-        sel_ages = st.multiselect("⏳ Filter Expiry Age", options=avail_ages, default=avail_ages)
-
-    # APPLY FILTERS
-    df_view = df_inv_analysis.copy()
-    if sel_cats: df_view = df_view[df_view['Stock_Category'].isin(sel_cats)]
-    if sel_brands and 'Brand' in df_view.columns: df_view = df_view[df_view['Brand'].isin(sel_brands)]
-    if sel_ages: df_view = df_view[df_view['Age_Category'].isin(sel_ages)]
-
-    # ========================================================
-    # 3. SUMMARY CARDS (Aggregated by Logic)
-    # ========================================================
-    st.divider()
-    
-    total_stk = df_view['Stock_Qty'].sum()
-    total_val = df_view['Stock_Value'].sum()
-    total_skus = df_view['SKU_ID'].nunique()
-    
-    # Hitung porsi stok fresh vs critical
-    fresh_stk = df_view[df_view['Age_Category'].str.contains('> 12|Fresh', na=False)]['Stock_Qty'].sum()
-    crit_stk = df_view[df_view['Age_Category'].str.contains('< 3|Critical', na=False)]['Stock_Qty'].sum()
-    
-    m1, m2, m3, m4, m5 = st.columns(5)
-    with m1: st.metric("Total Stock Qty", f"{total_stk:,.0f}")
-    with m2: st.metric("Total Stock Value", f"Rp {total_val:,.0f}")
-    with m3: st.metric("Total SKU Count", f"{total_skus}")
-    with m4: st.metric("Fresh Stock (>1y)", f"{fresh_stk:,.0f}", delta="Safe")
-    with m5: st.metric("Critical Stock (<3m)", f"{crit_stk:,.0f}", delta="Risk", delta_color="inverse")
-
-    # ========================================================
-    # 4. VISUALISASI KATEGORI & UMUR (Requirement 1 & 3)
-    # ========================================================
-    st.divider()
-    
-    c_chart1, c_chart2 = st.columns(2)
-    
-    with c_chart1:
-        st.subheader("📦 Stock by Category")
-        # Aggregation
-        cat_summary = df_view.groupby('Stock_Category').agg({'Stock_Qty': 'sum', 'Stock_Value': 'sum'}).reset_index()
+        with col_filter2:
+            # Filter Brand
+            if 'Brand' in df_inv_analysis.columns:
+                avail_brands = df_inv_analysis['Brand'].unique().tolist()
+                sel_brands = st.multiselect("🏷️ Filter Brand", options=avail_brands, default=avail_brands)
+            else:
+                sel_brands = []
+                st.info("No Brand data")
         
-        fig_cat = px.pie(cat_summary, values='Stock_Qty', names='Stock_Category', 
-                         title='Stock Quantity Share by Category', hole=0.4,
-                         color_discrete_sequence=px.colors.qualitative.Pastel)
-        fig_cat.update_traces(textposition='inside', textinfo='percent+label')
-        st.plotly_chart(fig_cat, use_container_width=True)
+        with col_filter3:
+            # Filter Age
+            if 'Age_Category' in df_inv_analysis.columns:
+                avail_ages = sorted(df_inv_analysis['Age_Category'].unique().tolist())
+                sel_ages = st.multiselect("⏳ Filter Expiry Age", options=avail_ages, default=avail_ages)
+            else:
+                sel_ages = []
+                st.info("No Age Category data")
         
-    with c_chart2:
-        st.subheader("⏳ Stock Expiry Age Profile")
-        # Aggregation by Age
-        age_summary = df_view.groupby('Age_Category')['Stock_Qty'].sum().reset_index()
+        # APPLY FILTERS
+        df_view = df_inv_analysis.copy()
+        if sel_cats and 'Stock_Category' in df_view.columns: 
+            df_view = df_view[df_view['Stock_Category'].isin(sel_cats)]
+        if sel_brands and 'Brand' in df_view.columns: 
+            df_view = df_view[df_view['Brand'].isin(sel_brands)]
+        if sel_ages and 'Age_Category' in df_view.columns: 
+            df_view = df_view[df_view['Age_Category'].isin(sel_ages)]
         
-        # Urutkan custom
-        age_order = ['< 3 Months (Critical)', '3 - 6 Months', '6 - 12 Months', '> 12 Months (Fresh)', 'Unknown/No Date']
-        
-        fig_age = px.bar(age_summary, x='Age_Category', y='Stock_Qty', 
-                         title='Stock Quantity by Remaining Shelf Life',
-                         color='Age_Category',
-                         category_orders={'Age_Category': age_order},
-                         color_discrete_map={
-                             '< 3 Months (Critical)': '#FF5252',
-                             '3 - 6 Months': '#FF9800',
-                             '6 - 12 Months': '#FFEB3B',
-                             '> 12 Months (Fresh)': '#4CAF50',
-                             'Unknown/No Date': '#9E9E9E'
-                         })
-        st.plotly_chart(fig_age, use_container_width=True)
-
-    # ========================================================
-    # 5. CLEARANCE SALES DETAIL (Requirement 4)
-    # ========================================================
-    # Filter khusus Clearance Sales atau Critical Age
-    df_clearance = df_inv_analysis[
-        (df_inv_analysis['Stock_Category'] == 'Clearance Sales') | 
-        (df_inv_analysis['Age_Category'] == '< 3 Months (Critical)')
-    ].copy()
-    
-    if not df_clearance.empty:
+        # ========================================================
+        # 3. SUMMARY CARDS
+        # ========================================================
         st.divider()
-        st.error(f"⚠️ CLEARANCE & NEAR EXPIRY ALERT ({len(df_clearance)} SKUs)")
-        st.markdown("**SKUs listed here are either categorized as 'Clearance Sales' OR have < 3 months expiry.**")
         
-        # Format Table
-        disp_clearance = df_clearance[[
-            'SKU_ID', 'Product_Name', 'Stock_Category', 'Age_Category', 
-            'Expiry_Date', 'Stock_Qty', 'Avg_Sales_L3M', 'Cover_Months', 'Stock_Value'
-        ]].sort_values(['Age_Category', 'Stock_Qty'], ascending=[True, False])
-        
-        # Formatting Columns
-        disp_clearance['Avg_Sales_L3M'] = disp_clearance['Avg_Sales_L3M'].apply(lambda x: f"{x:,.1f}")
-        disp_clearance['Cover_Months'] = disp_clearance['Cover_Months'].apply(lambda x: f"{x:.1f}" if x < 999 else "No Sales")
-        disp_clearance['Stock_Qty'] = disp_clearance['Stock_Qty'].apply(lambda x: f"{x:,.0f}")
-        disp_clearance['Stock_Value'] = disp_clearance['Stock_Value'].apply(lambda x: f"Rp {x:,.0f}")
-        
-        st.dataframe(disp_clearance, use_container_width=True, hide_index=True)
+        if not df_view.empty:
+            total_stk = df_view['Stock_Qty'].sum()
+            total_val = df_view['Stock_Value'].sum() if 'Stock_Value' in df_view.columns else 0
+            total_skus = df_view['SKU_ID'].nunique()
+            
+            # Hitung stok fresh vs critical
+            fresh_stk = 0
+            crit_stk = 0
+            if 'Age_Category' in df_view.columns:
+                fresh_mask = df_view['Age_Category'].str.contains('> 12|Fresh', na=False)
+                crit_mask = df_view['Age_Category'].str.contains('< 3|Critical', na=False)
+                fresh_stk = df_view.loc[fresh_mask, 'Stock_Qty'].sum() if fresh_mask.any() else 0
+                crit_stk = df_view.loc[crit_mask, 'Stock_Qty'].sum() if crit_mask.any() else 0
+            
+            m1, m2, m3, m4, m5 = st.columns(5)
+            with m1: st.metric("Total Stock Qty", f"{total_stk:,.0f}")
+            with m2: st.metric("Total Stock Value", f"Rp {total_val:,.0f}")
+            with m3: st.metric("Total SKU Count", f"{total_skus}")
+            with m4: st.metric("Fresh Stock (>1y)", f"{fresh_stk:,.0f}", delta="Safe")
+            with m5: st.metric("Critical Stock (<3m)", f"{crit_stk:,.0f}", delta="Risk", delta_color="inverse")
+            
+            # ========================================================
+            # 4. VISUALISASI
+            # ========================================================
+            st.divider()
+            
+            c_chart1, c_chart2 = st.columns(2)
+            
+            with c_chart1:
+                st.subheader("📦 Stock by Category")
+                if 'Stock_Category' in df_view.columns:
+                    cat_summary = df_view.groupby('Stock_Category')['Stock_Qty'].sum().reset_index()
+                    if not cat_summary.empty:
+                        fig_cat = px.pie(cat_summary, values='Stock_Qty', names='Stock_Category', 
+                                         title='Stock Quantity Share by Category', hole=0.4)
+                        fig_cat.update_traces(textposition='inside', textinfo='percent+label')
+                        st.plotly_chart(fig_cat, use_container_width=True)
+            
+            with c_chart2:
+                st.subheader("⏳ Stock Expiry Age Profile")
+                if 'Age_Category' in df_view.columns:
+                    age_summary = df_view.groupby('Age_Category')['Stock_Qty'].sum().reset_index()
+                    if not age_summary.empty:
+                        age_order = ['< 3 Months (Critical)', '3 - 6 Months', '6 - 12 Months', '> 12 Months (Fresh)', 'Unknown/No Date']
+                        fig_age = px.bar(age_summary, x='Age_Category', y='Stock_Qty', 
+                                         title='Stock Quantity by Remaining Shelf Life',
+                                         color='Age_Category',
+                                         category_orders={'Age_Category': age_order})
+                        st.plotly_chart(fig_age, use_container_width=True)
+            
+            # ========================================================
+            # 5. CLEARANCE SALES
+            # ========================================================
+            st.divider()
+            
+            clearance_items = []
+            if 'Stock_Category' in df_inv_analysis.columns:
+                clearance_items.extend(df_inv_analysis[df_inv_analysis['Stock_Category'] == 'Clearance Sales']['SKU_ID'].tolist())
+            if 'Age_Category' in df_inv_analysis.columns:
+                clearance_items.extend(df_inv_analysis[df_inv_analysis['Age_Category'] == '< 3 Months (Critical)']['SKU_ID'].tolist())
+            
+            if clearance_items:
+                df_clearance = df_inv_analysis[df_inv_analysis['SKU_ID'].isin(clearance_items)]
+                if not df_clearance.empty:
+                    st.error(f"⚠️ CLEARANCE & NEAR EXPIRY ALERT ({len(df_clearance)} SKUs)")
+                    display_cols = ['SKU_ID', 'Product_Name', 'Stock_Category', 'Age_Category', 
+                                   'Expiry_Date', 'Stock_Qty', 'Avg_Sales_L3M', 'Cover_Months']
+                    display_cols = [col for col in display_cols if col in df_clearance.columns]
+                    
+                    disp_clearance = df_clearance[display_cols].copy()
+                    if 'Stock_Value' in df_clearance.columns:
+                        disp_clearance['Stock_Value'] = df_clearance['Stock_Value']
+                    
+                    st.dataframe(disp_clearance, use_container_width=True)
+            
+            # ========================================================
+            # 6. DATA EXPLORER
+            # ========================================================
+            st.divider()
+            st.subheader("📋 Detailed Inventory Explorer")
+            
+            # Pilih kolom untuk ditampilkan
+            default_cols = ['SKU_ID', 'Product_Name', 'Brand', 'Stock_Category', 
+                          'Stock_Qty', 'Avg_Sales_L3M', 'Cover_Months', 'Age_Category']
+            if 'Expiry_Date' in df_view.columns:
+                default_cols.append('Expiry_Date')
+            if 'Stock_Value' in df_view.columns:
+                default_cols.append('Stock_Value')
+            
+            available_cols = [col for col in default_cols if col in df_view.columns]
+            
+            if available_cols:
+                display_df = df_view[available_cols].copy()
+                
+                # Format untuk display
+                if 'Stock_Qty' in display_df.columns:
+                    display_df['Stock_Qty'] = display_df['Stock_Qty'].apply(lambda x: f"{x:,.0f}")
+                if 'Avg_Sales_L3M' in display_df.columns:
+                    display_df['Avg_Sales_L3M'] = display_df['Avg_Sales_L3M'].apply(lambda x: f"{x:,.1f}")
+                if 'Cover_Months' in display_df.columns:
+                    display_df['Cover_Months'] = display_df['Cover_Months'].apply(lambda x: f"{x:.1f}" if x < 999 else "No Sales")
+                if 'Stock_Value' in display_df.columns:
+                    display_df['Stock_Value'] = display_df['Stock_Value'].apply(lambda x: f"Rp {x:,.0f}")
+                
+                st.dataframe(display_df, use_container_width=True, height=500)
+                
+                # Download
+                csv_data = df_view.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download Inventory Data",
+                    data=csv_data,
+                    file_name=f"inventory_analysis_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
     else:
-        st.success("✅ No Clearance or Critical Expiry items found.")
-
-    # ========================================================
-    # 6. MAIN DATA EXPLORER & COVER ANALYSIS (Req 2 & 5)
-    # ========================================================
-    st.divider()
-    st.subheader("📋 Detailed Inventory Explorer & Month Cover")
-    
-    # Pilihan Kolom untuk ditampilkan
-    default_cols = ['SKU_ID', 'Product_Name', 'Brand', 'Stock_Category', 
-                    'Stock_Qty', 'Avg_Sales_L3M', 'Cover_Months', 'Age_Category', 'Expiry_Date']
-    
-    # Tambahkan Anchanto Code jika ada
-    if 'Anchanto_Code' in df_view.columns:
-        default_cols.insert(1, 'Anchanto_Code')
-        
-    final_view = df_view.copy()
-    
-    # Formatting function for nice display
-    final_view['Avg_Sales_L3M'] = final_view['Avg_Sales_L3M'].apply(lambda x: f"{x:,.1f}")
-    final_view['Cover_Display'] = final_view['Cover_Months'].apply(
-        lambda x: f"{x:.1f} Mo" if x < 100 else "No Sales"
-    )
-    final_view['Stock_Qty_Disp'] = final_view['Stock_Qty'].apply(lambda x: f"{x:,.0f}")
-    
-    # Styling logic for Cover Months (Highlight Low/High Stock for Regular SKUs)
-    def style_stock_health(row):
-        val = row['Cover_Months']
-        cat = row['Stock_Category']
-        
-        if cat == 'SKU Regular':
-            if val < 0.8: return ['background-color: #FFEBEE; color: #C62828'] * len(row) # Low Stock
-            elif val > 4: return ['background-color: #E3F2FD; color: #1565C0'] * len(row) # Over Stock
-        return [''] * len(row)
-
-    # Display columns
-    disp_cols_final = [c for c in default_cols if c in final_view.columns]
-    
-    # Replace numeric columns with formatted ones for display
-    # (Optional: create clean dataframe for display to avoid dtype issues with styler)
-    df_display_table = final_view[disp_cols_final].copy()
-    
-    # Format Date Only (remove time)
-    if 'Expiry_Date' in df_display_table.columns:
-        df_display_table['Expiry_Date'] = pd.to_datetime(df_display_table['Expiry_Date']).dt.strftime('%d-%b-%Y')
-
-    st.dataframe(
-        df_display_table,
-        use_container_width=True,
-        column_config={
-            "Stock_Qty": st.column_config.NumberColumn("Qty", format="%d"),
-            "Avg_Sales_L3M": st.column_config.NumberColumn("Avg Sales (3M)", format="%.1f"),
-            "Cover_Months": st.column_config.NumberColumn("Cover (Mo)", format="%.1f"),
-        },
-        height=500
-    )
-    
-    # Download Button
-    csv_dl = final_view.to_csv(index=False)
-    st.download_button(
-        label="📥 Download Inventory Data (CSV)",
-        data=csv_dl,
-        file_name=f"Inventory_Analysis_{datetime.now().strftime('%Y%m%d')}.csv",
-        mime="text/csv"
-    )
+        st.error("❌ No inventory data available after processing")
 
 # --- TAB 4: SKU EVALUATION ---
 with tab4:
