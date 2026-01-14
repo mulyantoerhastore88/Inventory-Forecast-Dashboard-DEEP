@@ -4660,70 +4660,104 @@ with tab9:
     else:
         st.error("❌ No Reseller forecast data available")
 
-# --- TAB 10: FULFILLMENT COST ANALYSIS (OPTIMIZED LOGIC) ---
+# --- TAB 10: FULFILLMENT COST ANALYSIS (REVISI: GMV CONTRIBUTION) ---
 with tab10:
     st.subheader("🚚 Fulfillment Cost Analysis (BS)")
-    st.markdown("**Analisis Efisiensi: Business View (GMV) vs Operational View (Order)**")
+    st.markdown("**Analisis Kontribusi BS terhadap Total Marketplace & Efisiensi Biaya**")
     
     # Ambil data
     df_bs = all_data.get('fulfillment', pd.DataFrame())
     
     if not df_bs.empty:
-        # --- 1. KEY METRICS ---
+        # --- 1. KEY METRICS (HEADER) ---
         last_row = df_bs.iloc[-1]
         prev_row = df_bs.iloc[-2] if len(df_bs) > 1 else last_row
         last_month_name = last_row['Month']
         
-        col_k1, col_k2, col_k3, col_k4 = st.columns(4)
+        # Hitung Kontribusi
+        gmv_total = last_row.get('GMV Total (MP)', 0)
+        gmv_bs = last_row.get('GMV (Fullfil By BS)', 0)
+        contrib_pct = (gmv_bs / gmv_total * 100) if gmv_total > 0 else 0
         
-        with col_k1:
-            curr_gmv = last_row['GMV (Fullfil By BS)']
-            st.metric(f"GMV Fulfilled by BS", f"Rp {curr_gmv:,.0f}")
+        # Hitung Kontribusi Bulan Lalu (untuk Delta)
+        prev_gmv_total = prev_row.get('GMV Total (MP)', 0)
+        prev_gmv_bs = prev_row.get('GMV (Fullfil By BS)', 0)
+        prev_contrib_pct = (prev_gmv_bs / prev_gmv_total * 100) if prev_gmv_total > 0 else 0
+        delta_contrib = contrib_pct - prev_contrib_pct
+
+        # ROW 1: BUSINESS SCALE (GMV & CONTRIBUTION)
+        st.markdown("##### 💼 Business Scale & Contribution")
+        m1, m2, m3 = st.columns(3)
+        
+        with m1:
+            # GMV Total Marketplace
+            delta_gmv_tot = (gmv_total - prev_gmv_total) / prev_gmv_total * 100 if prev_gmv_total > 0 else 0
+            st.metric(f"GMV Total Marketplace (MP)", f"Rp {gmv_total:,.0f}", f"{delta_gmv_tot:+.1f}%")
             
-        with col_k2:
+        with m2:
+            # GMV Fulfilled by BS
+            delta_gmv_bs = (gmv_bs - prev_gmv_bs) / prev_gmv_bs * 100 if prev_gmv_bs > 0 else 0
+            st.metric(f"GMV Fulfilled by BS", f"Rp {gmv_bs:,.0f}", f"{delta_gmv_bs:+.1f}%")
+            
+        with m3:
+            # % Contribution
+            st.metric(f"% BS Contribution", f"{contrib_pct:.1f}%", f"{delta_contrib:+.1f}% (pts)")
+
+        st.markdown("---")
+
+        # ROW 2: OPERATIONAL EFFICIENCY (COST & ORDERS)
+        st.markdown("##### ⚙️ Operational Efficiency")
+        k1, k2, k3, k4 = st.columns(4)
+        
+        with k1:
+            curr_ord = last_row['Total Order(BS)']
+            delta_ord = (curr_ord - prev_row['Total Order(BS)']) / prev_row['Total Order(BS)'] * 100 if prev_row['Total Order(BS)'] > 0 else 0
+            st.metric(f"Total Orders (BS)", f"{curr_ord:,.0f}", f"{delta_ord:+.1f}%")
+
+        with k2:
+            curr_cost = last_row['Total Cost']
+            delta_cost = (curr_cost - prev_row['Total Cost']) / prev_row['Total Cost'] * 100 if prev_row['Total Cost'] > 0 else 0
+            st.metric(f"Total Cost", f"Rp {curr_cost:,.0f}", f"{delta_cost:+.1f}%", delta_color="inverse")
+            
+        with k3:
             curr_pct = last_row['%Cost']
             prev_pct = prev_row['%Cost']
             delta_pct = (curr_pct - prev_pct)
             st.metric(f"% Cost Ratio", f"{curr_pct:.2f}%", f"{delta_pct:+.2f}%", delta_color="inverse")
             
-        with col_k3:
-            curr_cost = last_row['Total Cost']
-            delta_cost = (curr_cost - prev_row['Total Cost']) / prev_row['Total Cost'] * 100 if prev_row['Total Cost'] > 0 else 0
-            st.metric(f"Total Cost", f"Rp {curr_cost:,.0f}", f"{delta_cost:+.1f}%", delta_color="inverse")
-            
-        with col_k4:
-            curr_ord = last_row['Total Order(BS)']
-            delta_ord = (curr_ord - prev_row['Total Order(BS)']) / prev_row['Total Order(BS)'] * 100 if prev_row['Total Order(BS)'] > 0 else 0
-            st.metric(f"Total Order", f"{curr_ord:,.0f}", f"{delta_ord:+.1f}%")
+        with k4:
+            curr_bsa = last_row['BSA']
+            delta_bsa = (curr_bsa - prev_row['BSA']) / prev_row['BSA'] * 100 if prev_row['BSA'] > 0 else 0
+            st.metric(f"BSA (Basket Size)", f"Rp {curr_bsa:,.0f}", f"{delta_bsa:+.1f}%")
 
         st.divider()
         
-        # --- 2. DUAL CHARTS (THE "YAHUT" VISUALIZATION) ---
+        # --- 2. DUAL CHARTS ---
         c1, c2 = st.columns([1, 1])
         
-        # --- CHART KIRI: BUSINESS HEALTH (GMV vs % COST) ---
+        # CHART KIRI: Business Health (GMV vs Cost %)
         with c1:
             st.subheader("💰 Business Efficiency")
-            st.caption("Apakah kenaikan GMV diimbangi dengan penurunan % Cost?")
+            st.caption("Korelasi GMV (BS) dengan % Cost Ratio")
             
             fig_biz = go.Figure()
             
-            # Bar: GMV (Kiri)
+            # Bar: GMV BS
             fig_biz.add_trace(go.Bar(
                 x=df_bs['Month'], 
                 y=df_bs['GMV (Fullfil By BS)'], 
-                name='GMV Fulfillment',
-                marker_color='#667eea', # Ungu Kebiruan
+                name='GMV BS',
+                marker_color='#667eea',
                 opacity=0.7
             ))
             
-            # Line: % Cost (Kanan)
+            # Line: % Cost Ratio
             fig_biz.add_trace(go.Scatter(
                 x=df_bs['Month'], 
                 y=df_bs['%Cost'], 
                 name='% Cost Ratio',
                 mode='lines+markers+text',
-                line=dict(color='#FF5252', width=3), # Merah
+                line=dict(color='#FF5252', width=3),
                 text=[f"{x:.2f}%" for x in df_bs['%Cost']],
                 textposition='top center',
                 yaxis='y2'
@@ -4732,7 +4766,7 @@ with tab10:
             fig_biz.update_layout(
                 height=450,
                 xaxis_title="Month",
-                yaxis=dict(title="GMV (Rp)"),
+                yaxis=dict(title="GMV Fulfilled (Rp)"),
                 yaxis2=dict(
                     title="% Cost Ratio", 
                     overlaying="y", 
@@ -4745,31 +4779,31 @@ with tab10:
             )
             st.plotly_chart(fig_biz, use_container_width=True)
             
-        # --- CHART KANAN: OPERATIONAL LOAD (COST vs ORDER) ---
+        # CHART KANAN: Operational Load (Order vs Cost)
         with c2:
             st.subheader("⚙️ Operational Load")
-            st.caption("Korelasi antara Total Cost dengan Volume Order")
+            st.caption("Korelasi Volume Order dengan Total Cost")
             
             fig_ops = go.Figure()
             
-            # Area: Total Cost (Kiri) - Kita pakai Area biar kelihatan "Beban" biaya
+            # Area: Total Cost
             fig_ops.add_trace(go.Scatter(
                 x=df_bs['Month'], 
                 y=df_bs['Total Cost'], 
                 name='Total Cost',
                 fill='tozeroy',
                 mode='lines',
-                line=dict(color='#FF9800', width=0), # Oranye, borderless
+                line=dict(color='#FF9800', width=0),
                 hovertemplate='Cost: Rp %{y:,.0f}'
             ))
             
-            # Line: Total Order (Kanan)
+            # Line: Total Order
             fig_ops.add_trace(go.Scatter(
                 x=df_bs['Month'], 
                 y=df_bs['Total Order(BS)'], 
                 name='Total Orders',
                 mode='lines+markers',
-                line=dict(color='#2196F3', width=3), # Biru
+                line=dict(color='#2196F3', width=3),
                 yaxis='y2',
                 hovertemplate='Order: %{y:,.0f}'
             ))
@@ -4792,68 +4826,70 @@ with tab10:
 
         st.divider()
         
-        # --- 3. BSA TREND (BASKET SIZE) ---
-        st.subheader("🛒 Basket Size Trend (BSA)")
-        st.caption("Rata-rata nilai belanja per order (Higher is usually Better for Cost Ratio)")
+        # --- 3. CONTRIBUTION & BASKET SIZE (REVISI) ---
+        st.subheader("🏢 Market Share & Basket Size Trend")
+        st.caption("Seberapa besar porsi fulfillment BS dibanding Total Marketplace?")
         
-        fig_bsa = go.Figure()
+        # Hitung GMV Non-BS
+        df_bs['GMV Non-BS'] = df_bs['GMV Total (MP)'] - df_bs['GMV (Fullfil By BS)']
         
-        fig_bsa.add_trace(go.Scatter(
+        fig_gmv = go.Figure()
+        
+        # Stacked Bar: Komposisi GMV
+        fig_gmv.add_trace(go.Bar(
             x=df_bs['Month'],
-            y=df_bs['BSA'],
-            name='BSA',
-            mode='lines+markers+text',
-            line=dict(color='#4CAF50', width=3), # Hijau
-            text=[f"{x/1000:.0f}k" for x in df_bs['BSA']], # Format 123k
-            textposition='top center',
-            fill='tozeroy', # Area hijau di bawah
-            fillcolor='rgba(76, 175, 80, 0.1)'
+            y=df_bs['GMV (Fullfil By BS)'],
+            name='Fulfilled by BS',
+            marker_color='#4CAF50'
         ))
         
-        fig_bsa.update_layout(
-            height=300,
-            xaxis_title="Month",
-            yaxis=dict(title="Basket Size Average (Rp)"),
-            margin=dict(l=0, r=0, t=30, b=0),
-            hovermode="x unified"
-        )
-        st.plotly_chart(fig_bsa, use_container_width=True)
+        fig_gmv.add_trace(go.Bar(
+            x=df_bs['Month'],
+            y=df_bs['GMV Non-BS'],
+            name='Non-BS Fulfillment',
+            marker_color='#E0E0E0'
+        ))
         
-        # --- 4. RAW DATA (SAFE FORMATTING) ---
+        # Line Chart: BSA (Basket Size)
+        fig_gmv.add_trace(go.Scatter(
+            x=df_bs['Month'],
+            y=df_bs['BSA'],
+            name='Basket Size (BSA)',
+            mode='lines+markers',
+            line=dict(color='#2196F3', width=3),
+            yaxis='y2'
+        ))
+        
+        fig_gmv.update_layout(
+            height=400,
+            xaxis_title="Month",
+            barmode='stack',
+            yaxis=dict(title="GMV Total (Rp)", side="left"),
+            yaxis2=dict(
+                title="Basket Size (Rp)",
+                overlaying="y",
+                side="right",
+                showgrid=False
+            ),
+            legend=dict(orientation="h", y=1.1),
+            hovermode="x unified",
+            margin=dict(t=50, b=0, l=0, r=0)
+        )
+        st.plotly_chart(fig_gmv, use_container_width=True)
+        
+        # --- 4. RAW DATA TABLE ---
         with st.expander("📋 View Detail Data"):
             df_disp = df_bs.copy()
+            # Format
+            for c in df_disp.columns:
+                if c in ['Total Order(BS)', 'GMV (Fullfil By BS)', 'GMV Total (MP)', 'Total Cost', 'BSA']:
+                    df_disp[c] = df_disp[c].apply(lambda x: f"{x:,.0f}")
+                elif '%Cost' in c:
+                    df_disp[c] = df_disp[c].apply(lambda x: f"{x:.2f}%")
             
-            # 1. Definisi Kolom Angka (Currency/Volume)
-            # Hanya kolom ini yang akan diformat ribuan
-            curr_cols = ['Total Order(BS)', 'GMV (Fullfil By BS)', 'GMV Total (MP)', 'Total Cost', 'BSA']
-            
-            # Helper function biar gak crash kalau ada data aneh
-            def safe_format_money(x):
-                try:
-                    # Pastikan convert ke float dulu baru format
-                    val = float(x)
-                    return f"{val:,.0f}"
-                except:
-                    return str(x) # Kalau error, balikin aslinya
-            
-            # Terapkan formatting
-            for c in curr_cols:
-                if c in df_disp.columns:
-                    df_disp[c] = df_disp[c].apply(safe_format_money)
-            
-            # 2. Definisi Kolom Persen
-            if '%Cost' in df_disp.columns:
-                def safe_format_pct(x):
-                    try:
-                        val = float(x)
-                        return f"{val:.2f}%"
-                    except:
-                        return str(x)
-                df_disp['%Cost'] = df_disp['%Cost'].apply(safe_format_pct)
-            
-            # 3. Buang kolom teknis yang tidak perlu ditampilkan
-            if 'Month_Date' in df_disp.columns:
-                df_disp = df_disp.drop(columns=['Month_Date'])
+            # Remove technical cols
+            cols_hide = ['Month_Date', 'GMV Non-BS']
+            df_disp = df_disp.drop(columns=[c for c in cols_hide if c in df_disp.columns])
             
             st.dataframe(df_disp, use_container_width=True)
 
