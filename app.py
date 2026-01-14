@@ -327,44 +327,33 @@ def add_product_info_to_data(df, df_product):
 @st.cache_data(ttl=300, max_entries=3, show_spinner=False)
 def load_and_process_data(_client):
     """
-    Load dan proses semua data. 
-    FIX: Stock_Onhand dibaca manual (get_all_values) untuk menangani header duplikat/kosong.
-    Sheet lain dibaca standar (get_all_records).
+    Load semua data termasuk sheet baru: BS_Fullfilment_Cost
     """
     
     gsheet_url = st.secrets["gsheet_url"]
     data = {}
 
-    # --- HELPER KHUSUS STOCK (BACA MANUAL) ---
+    # --- HELPER: Baca Sheet Manual ---
     def safe_read_stock_sheet(sheet_name):
         try:
             ws = _client.open_by_url(gsheet_url).worksheet(sheet_name)
             raw_data = ws.get_all_values()
-            
             if len(raw_data) < 2: return pd.DataFrame()
-            
-            # Header baris 1, Data baris 2 dst
             headers = [str(h).strip() for h in raw_data[0]]
             df = pd.DataFrame(raw_data[1:], columns=headers)
-            
-            # Hapus kolom tanpa nama (penyebab error duplicate header)
             df = df.loc[:, df.columns != '']
             return df
-        except Exception as e:
-            st.warning(f"Gagal membaca sheet {sheet_name}: {e}")
-            return pd.DataFrame()
+        except: return pd.DataFrame()
 
     try:
-        # 1. PRODUCT MASTER (Standard Load)
+        # 1. PRODUCT MASTER
         ws_prod = _client.open_by_url(gsheet_url).worksheet("Product_Master")
         df_product = pd.DataFrame(ws_prod.get_all_records())
         df_product.columns = [col.strip().replace(' ', '_') for col in df_product.columns]
         
-        # Validate prices
-        if 'Floor_Price' in df_product.columns:
-            df_product['Floor_Price'] = pd.to_numeric(df_product['Floor_Price'], errors='coerce').fillna(0)
-        if 'Net_Order_Price' in df_product.columns:
-            df_product['Net_Order_Price'] = pd.to_numeric(df_product['Net_Order_Price'], errors='coerce').fillna(0)
+        for col in ['Floor_Price', 'Net_Order_Price']:
+            if col in df_product.columns:
+                df_product[col] = pd.to_numeric(df_product[col], errors='coerce').fillna(0)
         
         if 'Status' not in df_product.columns: df_product['Status'] = 'Active'
         df_product_active = df_product[df_product['Status'].str.upper() == 'ACTIVE'].copy()
@@ -373,18 +362,15 @@ def load_and_process_data(_client):
         data['product'] = df_product
         data['product_active'] = df_product_active
 
-        # 2. SALES DATA (Standard Load)
+        # 2. SALES DATA
         ws_sales = _client.open_by_url(gsheet_url).worksheet("Sales")
         df_sales_raw = pd.DataFrame(ws_sales.get_all_records())
         df_sales_raw.columns = [col.strip() for col in df_sales_raw.columns]
-        
         month_cols = [c for c in df_sales_raw.columns if any(m in c.upper() for m in ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'])]
-        
         if month_cols and 'SKU_ID' in df_sales_raw.columns:
             id_cols = ['SKU_ID']
             for col in ['SKU_Name', 'Product_Name', 'Brand', 'SKU_Tier']:
                 if col in df_sales_raw.columns: id_cols.append(col)
-            
             df_sales_long = df_sales_raw.melt(id_vars=id_cols, value_vars=month_cols, var_name='Month_Label', value_name='Sales_Qty')
             df_sales_long['Sales_Qty'] = pd.to_numeric(df_sales_long['Sales_Qty'], errors='coerce').fillna(0)
             df_sales_long['Month'] = df_sales_long['Month_Label'].apply(validate_month_format)
@@ -392,18 +378,15 @@ def load_and_process_data(_client):
             df_sales_long = add_product_info_to_data(df_sales_long, df_product)
             data['sales'] = df_sales_long.sort_values('Month')
 
-        # 3. ROFO DATA (Standard Load)
+        # 3. ROFO DATA
         ws_rofo = _client.open_by_url(gsheet_url).worksheet("Rofo")
         df_rofo_raw = pd.DataFrame(ws_rofo.get_all_records())
         df_rofo_raw.columns = [col.strip() for col in df_rofo_raw.columns]
-        
         month_cols_rofo = [c for c in df_rofo_raw.columns if any(m in c.upper() for m in ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'])]
-        
         if month_cols_rofo:
             id_cols_rofo = ['SKU_ID']
             for col in ['Product_Name', 'Brand']:
                 if col in df_rofo_raw.columns: id_cols_rofo.append(col)
-            
             df_rofo_long = df_rofo_raw.melt(id_vars=id_cols_rofo, value_vars=month_cols_rofo, var_name='Month_Label', value_name='Forecast_Qty')
             df_rofo_long['Forecast_Qty'] = pd.to_numeric(df_rofo_long['Forecast_Qty'], errors='coerce').fillna(0)
             df_rofo_long['Month'] = df_rofo_long['Month_Label'].apply(validate_month_format)
@@ -411,13 +394,11 @@ def load_and_process_data(_client):
             df_rofo_long = add_product_info_to_data(df_rofo_long, df_product)
             data['forecast'] = df_rofo_long
 
-        # 4. PO DATA (Standard Load)
+        # 4. PO DATA
         ws_po = _client.open_by_url(gsheet_url).worksheet("PO")
         df_po_raw = pd.DataFrame(ws_po.get_all_records())
         df_po_raw.columns = [col.strip() for col in df_po_raw.columns]
-        
         month_cols_po = [c for c in df_po_raw.columns if any(m in c.upper() for m in ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'])]
-        
         if month_cols_po and 'SKU_ID' in df_po_raw.columns:
             df_po_long = df_po_raw.melt(id_vars=['SKU_ID'], value_vars=month_cols_po, var_name='Month_Label', value_name='PO_Qty')
             df_po_long['PO_Qty'] = pd.to_numeric(df_po_long['PO_Qty'], errors='coerce').fillna(0)
@@ -426,71 +407,46 @@ def load_and_process_data(_client):
             df_po_long = add_product_info_to_data(df_po_long, df_product)
             data['po'] = df_po_long
 
-        # ==============================================================================
-        # 5. STOCK DATA (KHUSUS: SAFE LOAD UNTUK MENGATASI ERROR HEADER)
-        # ==============================================================================
-        # Kita pakai helper safe_read_stock_sheet yang kita buat di atas
+        # 5. STOCK DATA
         df_stock_raw = safe_read_stock_sheet("Stock_Onhand")
-        
         if not df_stock_raw.empty:
-            # Mapping Kolom sesuai Header GSheet Bapak
             col_mapping = {
-                'SKU_ID': 'SKU_ID',
-                'Qty_Available': 'Stock_Qty',    # Target Rename
-                'Product_Code': 'Anchanto_Code', # Target Rename
-                'Stock_Category': 'Stock_Category',
-                'Expiry_Date': 'Expiry_Date',
-                'Product_Name': 'Product_Name'
+                'SKU_ID': 'SKU_ID', 'Qty_Available': 'Stock_Qty', 'Product_Code': 'Anchanto_Code',
+                'Stock_Category': 'Stock_Category', 'Expiry_Date': 'Expiry_Date', 'Product_Name': 'Product_Name'
             }
-            
-            # Cek apakah kolom kunci ada (SKU_ID & Qty_Available)
             if 'SKU_ID' in df_stock_raw.columns and 'Qty_Available' in df_stock_raw.columns:
-                # Ambil hanya kolom yang ada di mapping untuk kebersihan
                 cols_to_use = [c for c in col_mapping.keys() if c in df_stock_raw.columns]
                 df_stock = df_stock_raw[cols_to_use].copy()
-                
-                # Rename ke standar sistem
                 df_stock = df_stock.rename(columns=col_mapping)
-                
-                # Bersihkan data
                 df_stock['Stock_Qty'] = pd.to_numeric(df_stock['Stock_Qty'], errors='coerce').fillna(0)
                 df_stock['SKU_ID'] = df_stock['SKU_ID'].astype(str).str.strip()
-                
-                # Merge Harga dari Product Master (Penting untuk Valuasi Tab 3)
-                cols_price = ['Floor_Price', 'Net_Order_Price']
-                cols_price = [c for c in cols_price if c in df_product.columns]
-                if cols_price:
-                    df_stock = pd.merge(df_stock, df_product[['SKU_ID'] + cols_price], on='SKU_ID', how='left')
-
+                if 'Floor_Price' in df_product.columns:
+                    df_stock = pd.merge(df_stock, df_product[['SKU_ID', 'Floor_Price', 'Net_Order_Price']], on='SKU_ID', how='left')
                 data['stock'] = df_stock
             else:
-                st.warning("⚠️ Kolom 'SKU_ID' atau 'Qty_Available' tidak ditemukan di Stock_Onhand.")
                 data['stock'] = pd.DataFrame(columns=['SKU_ID', 'Stock_Qty'])
         else:
             data['stock'] = pd.DataFrame(columns=['SKU_ID', 'Stock_Qty'])
 
-        # 6. FORECAST 2026 ECOMM (Standard Load)
+        # 6. FORECAST 2026 ECOMM
         try:
             ws_ecomm = _client.open_by_url(gsheet_url).worksheet("Forecast_2026_Ecomm")
             df_ecomm_raw = pd.DataFrame(ws_ecomm.get_all_records())
             df_ecomm_raw.columns = [col.strip().replace(' ', '_') for col in df_ecomm_raw.columns]
-            
             month_cols_ecomm = [c for c in df_ecomm_raw.columns if any(m in c.upper() for m in ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'])]
             for col in month_cols_ecomm:
                 df_ecomm_raw[col] = pd.to_numeric(df_ecomm_raw[col], errors='coerce').fillna(0)
-            
             data['ecomm_forecast'] = df_ecomm_raw
             data['ecomm_forecast_month_cols'] = month_cols_ecomm
         except:
             data['ecomm_forecast'] = pd.DataFrame()
             data['ecomm_forecast_month_cols'] = []
-
-        # 7. FORECAST 2026 RESELLER (Standard Load)
+        
+        # 7. FORECAST 2026 RESELLER
         try:
             ws_reseller = _client.open_by_url(gsheet_url).worksheet("Forecast_2026_Reseller")
             df_reseller_raw = pd.DataFrame(ws_reseller.get_all_records())
             df_reseller_raw.columns = [col.strip().replace(' ', '_') for col in df_reseller_raw.columns]
-            
             all_month_cols_res = [c for c in df_reseller_raw.columns if any(m in c.upper() for m in ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'])]
             for col in all_month_cols_res:
                 df_reseller_raw[col] = pd.to_numeric(df_reseller_raw[col], errors='coerce').fillna(0)
@@ -510,7 +466,6 @@ def load_and_process_data(_client):
             
             hist_cols = [c for c in all_month_cols_res if not is_forecast_month(c)]
             fcst_cols = [c for c in all_month_cols_res if is_forecast_month(c)]
-            
             data['reseller_forecast'] = df_reseller_raw
             data['reseller_all_month_cols'] = all_month_cols_res
             data['reseller_historical_cols'] = hist_cols
@@ -520,6 +475,43 @@ def load_and_process_data(_client):
             data['reseller_all_month_cols'] = []
             data['reseller_historical_cols'] = []
             data['reseller_forecast_cols'] = []
+
+        # ==============================================================================
+        # 8. BS FULLFILMENT COST (NEW SHEET)
+        # ==============================================================================
+        try:
+            ws_bs = _client.open_by_url(gsheet_url).worksheet("BS_Fullfilment_Cost")
+            df_bs = pd.DataFrame(ws_bs.get_all_records())
+            
+            # Cleaning Headers & Data
+            # Hapus spasi di nama kolom
+            df_bs.columns = [c.strip() for c in df_bs.columns]
+            
+            # Helper untuk bersihkan angka (hapus koma dan persen)
+            def clean_currency(x):
+                if isinstance(x, str):
+                    return pd.to_numeric(x.replace(',', '').replace('%', ''), errors='coerce')
+                return x
+
+            # List kolom angka yang perlu dibersihkan
+            numeric_cols = ['Total Order(BS)', 'GMV (Fullfil By BS)', 'GMV Total (MP)', 'Total Cost', 'BSA', '%Cost']
+            
+            for col in numeric_cols:
+                if col in df_bs.columns:
+                    df_bs[col] = df_bs[col].apply(clean_currency).fillna(0)
+            
+            # Convert Percentages (karena 3.14% jadi 3.14, mungkin perlu dibagi 100 utk kalkulasi, tapi utk display biar saja)
+            # Kita tandai kolom ini
+            
+            # Parse Date (Apr-25)
+            df_bs['Month_Date'] = pd.to_datetime(df_bs['Month'], format='%b-%y', errors='coerce')
+            df_bs = df_bs.sort_values('Month_Date')
+            
+            data['fulfillment'] = df_bs
+            
+        except Exception as e:
+            st.warning(f"Gagal load BS_Fullfilment_Cost: {e}")
+            data['fulfillment'] = pd.DataFrame()
 
         return data
         
@@ -2008,16 +2000,17 @@ if monthly_performance:
 st.divider()
 
 # --- MAIN TABS ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
     "📈 Monthly Performance Details",
     "🏷️ Forecast Performance by Brand & Tier Analysis",
     "📦 Inventory Analysis",
     "🔍 SKU Evaluation",
     "📈 Sales & Forecast Analysis",
     "📋 Data Explorer",
-    "🛒 Ecommerce Forecast",  # Diubah dari "🔮 Forecast Generator"
+    "🛒 Ecommerce Forecast",  
     "💰 Profitability Analysis",
-    "🤝 Reseller Forecast"  # <-- TAB BARU
+    "🤝 Reseller Forecast",
+    "🚚 Fulfillment Cost Analysis" # <-- TAB BARU
 ])
 
 # --- TAB 1: MONTHLY PERFORMANCE DETAILS ---
@@ -4666,6 +4659,179 @@ with tab9:
 
     else:
         st.error("❌ No Reseller forecast data available")
+
+# --- TAB 10: FULFILLMENT COST ANALYSIS ---
+with tab10:
+    st.subheader("🚚 Fulfillment Cost Analysis (BS)")
+    st.markdown("**Analisis Biaya Operasional Fulfillment (Business Support vs Marketplace)**")
+    
+    # Ambil data
+    df_bs = all_data.get('fulfillment', pd.DataFrame())
+    
+    if not df_bs.empty:
+        # --- 1. KEY METRICS (HEADER) ---
+        # Ambil bulan terakhir
+        last_row = df_bs.iloc[-1]
+        prev_row = df_bs.iloc[-2] if len(df_bs) > 1 else last_row
+        
+        last_month_name = last_row['Month']
+        
+        col_k1, col_k2, col_k3, col_k4 = st.columns(4)
+        
+        with col_k1:
+            curr_cost = last_row['Total Cost']
+            prev_cost = prev_row['Total Cost']
+            delta_cost = (curr_cost - prev_cost) / prev_cost * 100 if prev_cost > 0 else 0
+            st.metric(f"Total Cost ({last_month_name})", f"Rp {curr_cost:,.0f}", f"{delta_cost:+.1f}%")
+            
+        with col_k2:
+            curr_ord = last_row['Total Order(BS)']
+            prev_ord = prev_row['Total Order(BS)']
+            delta_ord = (curr_ord - prev_ord) / prev_ord * 100 if prev_ord > 0 else 0
+            st.metric(f"Total Orders ({last_month_name})", f"{curr_ord:,.0f}", f"{delta_ord:+.1f}%")
+            
+        with col_k3:
+            curr_gmv = last_row['GMV (Fullfil By BS)']
+            st.metric(f"GMV Fulfilled by BS", f"Rp {curr_gmv:,.0f}")
+            
+        with col_k4:
+            curr_pct = last_row['%Cost']
+            prev_pct = prev_row['%Cost']
+            delta_pct = (curr_pct - prev_pct)
+            # Logic warna: Cost % naik = Merah (Inverse)
+            st.metric(f"% Cost to GMV", f"{curr_pct:.2f}%", f"{delta_pct:+.2f}%", delta_color="inverse")
+
+        st.divider()
+        
+        # --- 2. DUAL AXIS CHART: EFFICIENCY TREND ---
+        # Membandingkan Volume Order (Bar) dengan % Cost (Line)
+        # Tujuannya: Melihat apakah order naik membuat cost % turun (efisiensi)
+        
+        c1, c2 = st.columns([2, 1])
+        
+        with c1:
+            st.subheader("📊 Cost Efficiency Trend")
+            
+            fig_dual = go.Figure()
+            
+            # Bar: Total Order
+            fig_dual.add_trace(go.Bar(
+                x=df_bs['Month'], 
+                y=df_bs['Total Order(BS)'], 
+                name='Total Order',
+                marker_color='#667eea',
+                opacity=0.6
+            ))
+            
+            # Line: % Cost (Secondary Axis)
+            fig_dual.add_trace(go.Scatter(
+                x=df_bs['Month'], 
+                y=df_bs['%Cost'], 
+                name='% Cost',
+                mode='lines+markers+text',
+                line=dict(color='#FF5252', width=3),
+                text=[f"{x:.2f}%" for x in df_bs['%Cost']],
+                textposition='top center',
+                yaxis='y2'
+            ))
+            
+            fig_dual.update_layout(
+                height=400,
+                xaxis_title="Month",
+                yaxis=dict(title="Total Order (Bar)", side="left"),
+                yaxis2=dict(title="% Cost (Line)", side="right", overlaying="y", showgrid=False),
+                legend=dict(orientation="h", y=1.1),
+                hovermode="x unified",
+                margin=dict(l=0, r=0, t=30, b=0)
+            )
+            
+            st.plotly_chart(fig_dual, use_container_width=True)
+            
+        with c2:
+            st.subheader("💰 Cost Structure Trend")
+            # Membandingkan Total Cost vs BSA (Base Service Amount)
+            
+            fig_area = go.Figure()
+            
+            fig_area.add_trace(go.Scatter(
+                x=df_bs['Month'], 
+                y=df_bs['Total Cost'], 
+                name='Total Cost',
+                fill='tozeroy',
+                line=dict(color='#FF9800')
+            ))
+            
+            fig_area.add_trace(go.Scatter(
+                x=df_bs['Month'], 
+                y=df_bs['BSA'], 
+                name='BSA Cost',
+                fill='tozeroy',
+                line=dict(color='#4CAF50')
+            ))
+            
+            fig_area.update_layout(
+                height=400,
+                xaxis_title="Month",
+                yaxis_title="Amount (Rp)",
+                margin=dict(l=0, r=0, t=30, b=0),
+                legend=dict(orientation="h", y=1.1)
+            )
+            st.plotly_chart(fig_area, use_container_width=True)
+
+        st.divider()
+        
+        # --- 3. GMV CONTRIBUTION ---
+        st.subheader("🏢 GMV Contribution: BS Fulfillment vs Total Marketplace")
+        
+        # Prepare data for stacked/group bar
+        # Kita punya GMV BS dan GMV Total. Berarti GMV Non-BS = Total - BS
+        df_bs['GMV Non-BS'] = df_bs['GMV Total (MP)'] - df_bs['GMV (Fullfil By BS)']
+        
+        fig_stack = go.Figure()
+        
+        fig_stack.add_trace(go.Bar(
+            x=df_bs['Month'],
+            y=df_bs['GMV (Fullfil By BS)'],
+            name='Fulfilled by BS',
+            marker_color='#667eea'
+        ))
+        
+        fig_stack.add_trace(go.Bar(
+            x=df_bs['Month'],
+            y=df_bs['GMV Non-BS'],
+            name='Other Fulfillment',
+            marker_color='#E0E0E0'
+        ))
+        
+        # Line % Contribution
+        # Kita perlu hitung % manual dari kolom string yang mungkin ada % nya
+        # Tapi di loader kita sudah clean jadi numeric, aman.
+        
+        fig_stack.update_layout(
+            barmode='stack',
+            height=400,
+            xaxis_title="Month",
+            yaxis_title="GMV Value (Rp)",
+            title="Proportion of GMV Fulfilled by BS",
+            hovermode="x unified"
+        )
+        
+        st.plotly_chart(fig_stack, use_container_width=True)
+        
+        # --- 4. DATA TABLE ---
+        with st.expander("📋 View Raw Data"):
+            # Format display
+            df_disp = df_bs.copy()
+            for c in ['Total Order(BS)', 'GMV (Fullfil By BS)', 'GMV Total (MP)', 'Total Cost', 'BSA']:
+                df_disp[c] = df_disp[c].apply(lambda x: f"{x:,.0f}")
+            
+            df_disp['%Cost'] = df_disp['%Cost'].apply(lambda x: f"{x:.2f}%")
+            
+            st.dataframe(df_disp, use_container_width=True)
+
+    else:
+        st.warning("⚠️ Data 'BS_Fullfilment_Cost' belum tersedia atau format kolom tidak sesuai.")
+        st.info("Pastikan sheet bernama 'BS_Fullfilment_Cost' ada di Google Sheet dengan kolom: Month, Total Order(BS), GMV (Fullfil By BS), GMV Total (MP), Total Cost, BSA, %Cost")
 
 # --- FOOTER ---
 st.divider()
