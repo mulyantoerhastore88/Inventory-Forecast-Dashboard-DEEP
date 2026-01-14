@@ -21,6 +21,27 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# --- TAMBAHAN: CSS KHUSUS PRINT PDF (Agar Sidebar Hilang & Warna Muncul) ---
+st.markdown("""
+<style>
+    @media print {
+        /* Sembunyikan sidebar saat dicetak agar data lebih lebar */
+        [data-testid="stSidebar"] {
+            display: none;
+        }
+        /* Sembunyikan elemen-elemen interaktif yang mengganggu di PDF */
+        .stButton, .stDeployButton, [data-testid="stHeader"] {
+            display: none;
+        }
+        /* Pastikan background warna tetap tercetak */
+        * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+        }
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # --- Custom CSS Premium ---
 st.markdown("""
 <style>
@@ -1284,9 +1305,28 @@ with st.sidebar:
     with col_sb2:
         if st.button("📊 Show Data Stats", use_container_width=True):
             st.session_state.show_stats = True
+            
+    # --- TAMBAHAN: TOMBOL CETAK PDF ---
+    st.markdown("---")
+    import streamlit.components.v1 as components
     
+    if st.button("🖨️ Save as PDF", use_container_width=True):
+        # Script JavaScript untuk memicu dialog print browser
+        components.html(
+            """
+            <script>
+            window.print();
+            </script>
+            """,
+            height=0,
+            width=0
+        )
+    st.caption("Tip: Pilih Destination **'Save as PDF'** & centang **'Background graphics'** di settings print.")
+    # ----------------------------------
+
     st.markdown("---")
     st.markdown("### 📈 Data Overview")
+    
     
     if not df_product_active.empty:
         st.metric("Active SKUs", len(df_product_active))
