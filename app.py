@@ -406,56 +406,65 @@ def load_and_process_data(_client):
             df_po_long = add_product_info_to_data(df_po_long, df_product)
             data['po'] = df_po_long
         
-        # ==============================================================================
-        # 5. STOCK DATA (FIXED: BACA MANUAL AGAR TIDAK ERROR DUPLICATE HEADER)
-        # ==============================================================================
+        # 5. STOCK DATA (FIXED & ROBUST)
         ws_stock = _client.open_by_url(gsheet_url).worksheet("Stock_Onhand")
         
-        # Pakai get_all_values() agar bisa handle header duplikat/kosong secara manual
+        # Gunakan get_all_values() agar kita bisa handle header secara manual (Anti-Error Duplicate)
         raw_stock_data = ws_stock.get_all_values()
         
         if len(raw_stock_data) > 1:
-            # Ambil header dan bersihkan spasi
+            # 1. Ambil Header & Bersihkan Spasi (Tanpa mengubah jadi underscore)
             headers = [str(h).strip() for h in raw_stock_data[0]]
             
-            # Buat DataFrame manual
+            # 2. Buat DataFrame
             df_stock_raw = pd.DataFrame(raw_stock_data[1:], columns=headers)
             
-            # Buang kolom yang namanya kosong (penyebab error duplicates: [''])
+            # 3. Buang kolom hantu (header kosong)
             df_stock_raw = df_stock_raw.loc[:, df_stock_raw.columns != '']
             
-            # Definisi Mapping (Sesuai Info Bapak)
+            # 4. Definisikan Target Kolom (Apa nama di GSheet -> Apa nama di System)
             col_mapping = {
                 'SKU_ID': 'SKU_ID',
-                'Qty_Available': 'Stock_Qty',    # Target Rename
-                'Product_Code': 'Anchanto_Code', # Target Rename
+                'Qty_Available': 'Stock_Qty',    # <--- INI KUNCINYA
+                'Product_Code': 'Anchanto_Code',
                 'Stock_Category': 'Stock_Category',
                 'Expiry_Date': 'Expiry_Date',
-                'Product_Name': 'Product_Name'
+                'Product_Name': 'Product_Name',
+                'Brand': 'Brand'
             }
             
-            # Cek apakah kolom kunci ada
+            # 5. Cek apakah kolom kunci (SKU_ID & Qty) tersedia
             if 'SKU_ID' in df_stock_raw.columns and 'Qty_Available' in df_stock_raw.columns:
-                # Ambil kolom yang dibutuhkan saja
+                
+                # Ambil hanya kolom yang ada di mapping
                 cols_to_use = [c for c in col_mapping.keys() if c in df_stock_raw.columns]
                 df_stock = df_stock_raw[cols_to_use].copy()
                 
-                # Rename sesuai standar sistem
+                # Rename kolom ke standar sistem ('Stock_Qty', dll)
                 df_stock = df_stock.rename(columns=col_mapping)
                 
-                # Convert ke numerik
+                # Bersihkan data angka & string
                 df_stock['Stock_Qty'] = pd.to_numeric(df_stock['Stock_Qty'], errors='coerce').fillna(0)
                 df_stock['SKU_ID'] = df_stock['SKU_ID'].astype(str).str.strip()
                 
-                # Merge Harga (Penting untuk Tab 3 Value)
+                # Filter SKU yang aktif saja (Opsional, matikan jika ingin lihat semua stok)
+                df_stock = df_stock[df_stock['SKU_ID'].isin(active_skus)]
+                
+                # Lookup Harga dari Product Master (Penting untuk Valuasi di Tab 3)
                 cols_price = ['Floor_Price', 'Net_Order_Price']
                 cols_price = [c for c in cols_price if c in df_product.columns]
+                
+                # Lakukan merge harga jika kolom harga belum ada di data stock
                 if cols_price:
-                    df_stock = pd.merge(df_stock, df_product[['SKU_ID'] + cols_price], on='SKU_ID', how='left')
+                     # Hapus kolom harga jika kebetulan sudah ada di stock agar tidak duplikat saat merge
+                    cols_to_merge = [c for c in cols_price if c not in df_stock.columns]
+                    if cols_to_merge:
+                        df_stock = pd.merge(df_stock, df_product[['SKU_ID'] + cols_to_merge], on='SKU_ID', how='left')
 
                 data['stock'] = df_stock
             else:
-                st.warning("⚠️ Kolom 'SKU_ID' atau 'Qty_Available' tidak ditemukan di Stock_Onhand.")
+                # Fallback jika nama kolom di GSheet berubah lagi
+                st.warning(f"⚠️ Kolom 'SKU_ID' atau 'Qty_Available' tidak ditemukan di Stock_Onhand. Header terbaca: {list(df_stock_raw.columns)}")
                 data['stock'] = pd.DataFrame(columns=['SKU_ID', 'Stock_Qty'])
         else:
             data['stock'] = pd.DataFrame(columns=['SKU_ID', 'Stock_Qty'])
