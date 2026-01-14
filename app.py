@@ -4819,16 +4819,42 @@ with tab10:
         )
         st.plotly_chart(fig_bsa, use_container_width=True)
         
-        # --- 4. RAW DATA ---
+        # --- 4. RAW DATA (SAFE FORMATTING) ---
         with st.expander("📋 View Detail Data"):
             df_disp = df_bs.copy()
-            # Format
-            for c in df_disp.columns:
-                if c != 'Month' and c != 'Month_Date':
-                    if '%Cost' in c:
-                        df_disp[c] = df_disp[c].apply(lambda x: f"{x:.2f}%")
-                    else:
-                        df_disp[c] = df_disp[c].apply(lambda x: f"{x:,.0f}")
+            
+            # 1. Definisi Kolom Angka (Currency/Volume)
+            # Hanya kolom ini yang akan diformat ribuan
+            curr_cols = ['Total Order(BS)', 'GMV (Fullfil By BS)', 'GMV Total (MP)', 'Total Cost', 'BSA']
+            
+            # Helper function biar gak crash kalau ada data aneh
+            def safe_format_money(x):
+                try:
+                    # Pastikan convert ke float dulu baru format
+                    val = float(x)
+                    return f"{val:,.0f}"
+                except:
+                    return str(x) # Kalau error, balikin aslinya
+            
+            # Terapkan formatting
+            for c in curr_cols:
+                if c in df_disp.columns:
+                    df_disp[c] = df_disp[c].apply(safe_format_money)
+            
+            # 2. Definisi Kolom Persen
+            if '%Cost' in df_disp.columns:
+                def safe_format_pct(x):
+                    try:
+                        val = float(x)
+                        return f"{val:.2f}%"
+                    except:
+                        return str(x)
+                df_disp['%Cost'] = df_disp['%Cost'].apply(safe_format_pct)
+            
+            # 3. Buang kolom teknis yang tidak perlu ditampilkan
+            if 'Month_Date' in df_disp.columns:
+                df_disp = df_disp.drop(columns=['Month_Date'])
+            
             st.dataframe(df_disp, use_container_width=True)
 
     else:
