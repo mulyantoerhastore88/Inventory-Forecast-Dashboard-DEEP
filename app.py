@@ -4660,20 +4660,18 @@ with tab9:
     else:
         st.error("❌ No Reseller forecast data available")
 
-# --- TAB 10: FULFILLMENT COST ANALYSIS ---
+# --- TAB 10: FULFILLMENT COST ANALYSIS (REVISI BSA) ---
 with tab10:
     st.subheader("🚚 Fulfillment Cost Analysis (BS)")
-    st.markdown("**Analisis Biaya Operasional Fulfillment (Business Support vs Marketplace)**")
+    st.markdown("**Analisis Biaya Operasional & Basket Size (Business Support)**")
     
     # Ambil data
     df_bs = all_data.get('fulfillment', pd.DataFrame())
     
     if not df_bs.empty:
         # --- 1. KEY METRICS (HEADER) ---
-        # Ambil bulan terakhir
         last_row = df_bs.iloc[-1]
         prev_row = df_bs.iloc[-2] if len(df_bs) > 1 else last_row
-        
         last_month_name = last_row['Month']
         
         col_k1, col_k2, col_k3, col_k4 = st.columns(4)
@@ -4682,52 +4680,52 @@ with tab10:
             curr_cost = last_row['Total Cost']
             prev_cost = prev_row['Total Cost']
             delta_cost = (curr_cost - prev_cost) / prev_cost * 100 if prev_cost > 0 else 0
-            st.metric(f"Total Cost ({last_month_name})", f"Rp {curr_cost:,.0f}", f"{delta_cost:+.1f}%")
+            st.metric(f"Total Cost ({last_month_name})", f"Rp {curr_cost:,.0f}", f"{delta_cost:+.1f}%", delta_color="inverse")
             
         with col_k2:
-            curr_ord = last_row['Total Order(BS)']
-            prev_ord = prev_row['Total Order(BS)']
-            delta_ord = (curr_ord - prev_ord) / prev_ord * 100 if prev_ord > 0 else 0
-            st.metric(f"Total Orders ({last_month_name})", f"{curr_ord:,.0f}", f"{delta_ord:+.1f}%")
+            curr_bsa = last_row['BSA'] # Basket Size Average
+            prev_bsa = prev_row['BSA']
+            delta_bsa = (curr_bsa - prev_bsa) / prev_bsa * 100 if prev_bsa > 0 else 0
+            # BSA Naik = Bagus (Hijau)
+            st.metric(f"BSA (Avg Order Value)", f"Rp {curr_bsa:,.0f}", f"{delta_bsa:+.1f}%")
             
         with col_k3:
             curr_gmv = last_row['GMV (Fullfil By BS)']
-            st.metric(f"GMV Fulfilled by BS", f"Rp {curr_gmv:,.0f}")
+            prev_gmv = prev_row['GMV (Fullfil By BS)']
+            delta_gmv = (curr_gmv - prev_gmv) / prev_gmv * 100 if prev_gmv > 0 else 0
+            st.metric(f"GMV Fulfilled by BS", f"Rp {curr_gmv:,.0f}", f"{delta_gmv:+.1f}%")
             
         with col_k4:
             curr_pct = last_row['%Cost']
             prev_pct = prev_row['%Cost']
             delta_pct = (curr_pct - prev_pct)
-            # Logic warna: Cost % naik = Merah (Inverse)
             st.metric(f"% Cost to GMV", f"{curr_pct:.2f}%", f"{delta_pct:+.2f}%", delta_color="inverse")
 
         st.divider()
         
-        # --- 2. DUAL AXIS CHART: EFFICIENCY TREND ---
-        # Membandingkan Volume Order (Bar) dengan % Cost (Line)
-        # Tujuannya: Melihat apakah order naik membuat cost % turun (efisiensi)
-        
+        # --- 2. COST & EFFICIENCY CHARTS ---
         c1, c2 = st.columns([2, 1])
         
         with c1:
             st.subheader("📊 Cost Efficiency Trend")
+            # Dual Axis: Total Order vs % Cost
             
-            fig_dual = go.Figure()
+            fig_eff = go.Figure()
             
             # Bar: Total Order
-            fig_dual.add_trace(go.Bar(
+            fig_eff.add_trace(go.Bar(
                 x=df_bs['Month'], 
                 y=df_bs['Total Order(BS)'], 
-                name='Total Order',
+                name='Total Orders',
                 marker_color='#667eea',
-                opacity=0.6
+                opacity=0.7
             ))
             
-            # Line: % Cost (Secondary Axis)
-            fig_dual.add_trace(go.Scatter(
+            # Line: % Cost (Y2)
+            fig_eff.add_trace(go.Scatter(
                 x=df_bs['Month'], 
                 y=df_bs['%Cost'], 
-                name='% Cost',
+                name='% Cost Ratio',
                 mode='lines+markers+text',
                 line=dict(color='#FF5252', width=3),
                 text=[f"{x:.2f}%" for x in df_bs['%Cost']],
@@ -4735,110 +4733,121 @@ with tab10:
                 yaxis='y2'
             ))
             
-            fig_dual.update_layout(
+            fig_eff.update_layout(
                 height=400,
                 xaxis_title="Month",
-                yaxis=dict(title="Total Order (Bar)", side="left"),
-                yaxis2=dict(title="% Cost (Line)", side="right", overlaying="y", showgrid=False),
-                legend=dict(orientation="h", y=1.1),
-                hovermode="x unified",
-                margin=dict(l=0, r=0, t=30, b=0)
-            )
-            
-            st.plotly_chart(fig_dual, use_container_width=True)
-            
-        with c2:
-            st.subheader("💰 Cost Structure Trend")
-            
-            fig_area = go.Figure()
-            
-            # Trace 1: Total Cost (Sumbu Kiri - Default)
-            fig_area.add_trace(go.Scatter(
-                x=df_bs['Month'], 
-                y=df_bs['Total Cost'], 
-                name='Total Cost',
-                fill='tozeroy',
-                line=dict(color='#FF9800')
-            ))
-            
-            # Trace 2: BSA (Sumbu Kanan - Y2)
-            fig_area.add_trace(go.Scatter(
-                x=df_bs['Month'], 
-                y=df_bs['BSA'], 
-                name='BSA Cost',
-                line=dict(color='#4CAF50', width=3),
-                yaxis='y2' # <--- Ini kuncinya biar dia baca sumbu kanan
-            ))
-            
-            # Layout Dual Axis Paling Sederhana (Anti-Error)
-            fig_area.update_layout(
-                height=400,
-                xaxis_title="Month",
-                
-                # Sumbu Y Kiri
-                yaxis=dict(
-                    title="Total Cost (Rp)"
-                ),
-                
-                # Sumbu Y Kanan (Overlay)
+                yaxis=dict(title="Total Order (Bar)"),
                 yaxis2=dict(
-                    title="BSA Cost (Rp)",
-                    overlaying="y", # Menumpuk di atas sumbu Y kiri
-                    side="right"    # Posisi di kanan
+                    title="% Cost Ratio (Line)", 
+                    overlaying="y", 
+                    side="right", 
+                    showgrid=False,
+                    titlefont=dict(color="#FF5252"),
+                    tickfont=dict(color="#FF5252")
                 ),
-                
                 legend=dict(orientation="h", y=1.1),
                 margin=dict(l=0, r=0, t=30, b=0),
                 hovermode="x unified"
             )
+            st.plotly_chart(fig_eff, use_container_width=True)
             
-            st.plotly_chart(fig_area, use_container_width=True)
+        with c2:
+            st.subheader("💰 Total Cost Trend")
+            # Hapus BSA dari sini, jadi cuma Total Cost (Area Chart)
+            
+            fig_cost = go.Figure()
+            
+            fig_cost.add_trace(go.Scatter(
+                x=df_bs['Month'], 
+                y=df_bs['Total Cost'], 
+                name='Total Cost',
+                fill='tozeroy',
+                mode='lines+markers',
+                line=dict(color='#FF9800', width=2),
+                hovertemplate='Rp %{y:,.0f}'
+            ))
+            
+            fig_cost.update_layout(
+                height=400,
+                xaxis_title="Month",
+                yaxis=dict(title="Total Cost (Rp)"),
+                margin=dict(l=0, r=0, t=30, b=0),
+                showlegend=False
+            )
+            st.plotly_chart(fig_cost, use_container_width=True)
 
         st.divider()
         
-        # --- 3. GMV CONTRIBUTION ---
-        st.subheader("🏢 GMV Contribution: BS Fulfillment vs Total Marketplace")
+        # --- 3. GMV CONTRIBUTION & BSA (DUAL AXIS) ---
+        st.subheader("🏢 GMV Contribution & Basket Size (BSA)")
+        st.caption("Bar: Komposisi GMV Fulfillment | Line: Rata-rata Nilai Order (BSA)")
         
-        # Prepare data for stacked/group bar
-        # Kita punya GMV BS dan GMV Total. Berarti GMV Non-BS = Total - BS
+        # Hitung GMV Non-BS
         df_bs['GMV Non-BS'] = df_bs['GMV Total (MP)'] - df_bs['GMV (Fullfil By BS)']
         
-        fig_stack = go.Figure()
+        fig_gmv = go.Figure()
         
-        fig_stack.add_trace(go.Bar(
+        # Stacked Bar 1: GMV BS
+        fig_gmv.add_trace(go.Bar(
             x=df_bs['Month'],
             y=df_bs['GMV (Fullfil By BS)'],
             name='Fulfilled by BS',
-            marker_color='#667eea'
+            marker_color='#4CAF50' # Hijau
         ))
         
-        fig_stack.add_trace(go.Bar(
+        # Stacked Bar 2: GMV Non-BS
+        fig_gmv.add_trace(go.Bar(
             x=df_bs['Month'],
             y=df_bs['GMV Non-BS'],
             name='Other Fulfillment',
-            marker_color='#E0E0E0'
+            marker_color='#E0E0E0' # Abu-abu
         ))
         
-        # Line % Contribution
-        # Kita perlu hitung % manual dari kolom string yang mungkin ada % nya
-        # Tapi di loader kita sudah clean jadi numeric, aman.
+        # Line Chart: BSA (Sumbu Kanan)
+        fig_gmv.add_trace(go.Scatter(
+            x=df_bs['Month'],
+            y=df_bs['BSA'],
+            name='BSA (Avg Order Value)',
+            mode='lines+markers',
+            line=dict(color='#2196F3', width=3), # Biru
+            yaxis='y2' # <--- KUNCI DUAL AXIS
+        ))
         
-        fig_stack.update_layout(
-            barmode='stack',
-            height=400,
+        # Layout Config
+        fig_gmv.update_layout(
+            height=450,
             xaxis_title="Month",
-            yaxis_title="GMV Value (Rp)",
-            title="Proportion of GMV Fulfilled by BS",
-            hovermode="x unified"
+            barmode='stack', # Supaya GMV-nya numpuk
+            
+            # Sumbu Kiri (GMV - Milyaran)
+            yaxis=dict(
+                title="GMV Value (Rp)",
+                side="left"
+            ),
+            
+            # Sumbu Kanan (BSA - Ratusan Ribu)
+            yaxis2=dict(
+                title="BSA / Avg Order (Rp)",
+                overlaying="y",
+                side="right",
+                showgrid=False,
+                titlefont=dict(color="#2196F3"),
+                tickfont=dict(color="#2196F3")
+            ),
+            
+            legend=dict(orientation="h", y=1.1),
+            hovermode="x unified",
+            margin=dict(t=50, b=0, l=0, r=0)
         )
         
-        st.plotly_chart(fig_stack, use_container_width=True)
+        st.plotly_chart(fig_gmv, use_container_width=True)
         
-        # --- 4. DATA TABLE ---
-        with st.expander("📋 View Raw Data"):
-            # Format display
+        # --- 4. RAW DATA TABLE ---
+        with st.expander("📋 View Detail Data"):
             df_disp = df_bs.copy()
-            for c in ['Total Order(BS)', 'GMV (Fullfil By BS)', 'GMV Total (MP)', 'Total Cost', 'BSA']:
+            # Format currency columns
+            curr_cols = ['Total Order(BS)', 'GMV (Fullfil By BS)', 'GMV Total (MP)', 'Total Cost', 'BSA']
+            for c in curr_cols:
                 df_disp[c] = df_disp[c].apply(lambda x: f"{x:,.0f}")
             
             df_disp['%Cost'] = df_disp['%Cost'].apply(lambda x: f"{x:.2f}%")
@@ -4846,8 +4855,7 @@ with tab10:
             st.dataframe(df_disp, use_container_width=True)
 
     else:
-        st.warning("⚠️ Data 'BS_Fullfilment_Cost' belum tersedia atau format kolom tidak sesuai.")
-        st.info("Pastikan sheet bernama 'BS_Fullfilment_Cost' ada di Google Sheet dengan kolom: Month, Total Order(BS), GMV (Fullfil By BS), GMV Total (MP), Total Cost, BSA, %Cost")
+        st.warning("⚠️ Data 'BS_Fullfilment_Cost' belum tersedia.")
 
 # --- FOOTER ---
 st.divider()
