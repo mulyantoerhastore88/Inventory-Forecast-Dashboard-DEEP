@@ -4826,51 +4826,68 @@ with tab10:
 
         st.divider()
         
-        # --- 3. CONTRIBUTION & BASKET SIZE (REVISI) ---
+        # --- 3. CONTRIBUTION & BASKET SIZE (WITH LABELS) ---
         st.subheader("🏢 Market Share & Basket Size Trend")
-        st.caption("Seberapa besar porsi fulfillment BS dibanding Total Marketplace?")
+        st.caption("Bar: Komposisi GMV (Label dalam Milyar) | Line: Rata-rata Nilai Order")
         
         # Hitung GMV Non-BS
         df_bs['GMV Non-BS'] = df_bs['GMV Total (MP)'] - df_bs['GMV (Fullfil By BS)']
         
         fig_gmv = go.Figure()
         
-        # Stacked Bar: Komposisi GMV
+        # Stacked Bar 1: GMV BS (Hijau)
         fig_gmv.add_trace(go.Bar(
             x=df_bs['Month'],
             y=df_bs['GMV (Fullfil By BS)'],
             name='Fulfilled by BS',
-            marker_color='#4CAF50'
+            marker_color='#4CAF50',
+            # TAMBAHAN LABEL ANGKA
+            text=[f"{x/1e9:.1f} M" for x in df_bs['GMV (Fullfil By BS)']], # Format: 6.7 M
+            textposition='auto', # Plotly otomatis atur posisi terbaik
+            textfont=dict(color='white') # Warna teks putih biar kontras di hijau
         ))
         
+        # Stacked Bar 2: GMV Non-BS (Abu-abu)
         fig_gmv.add_trace(go.Bar(
             x=df_bs['Month'],
             y=df_bs['GMV Non-BS'],
             name='Non-BS Fulfillment',
-            marker_color='#E0E0E0'
+            marker_color='#9E9E9E', # Sedikit digelapkan biar teks putih terbaca
+            # TAMBAHAN LABEL ANGKA
+            text=[f"{x/1e9:.1f} M" for x in df_bs['GMV Non-BS']],
+            textposition='auto',
+            textfont=dict(color='white')
         ))
         
-        # Line Chart: BSA (Basket Size)
+        # Line Chart: BSA (Basket Size) - Biru
         fig_gmv.add_trace(go.Scatter(
             x=df_bs['Month'],
             y=df_bs['BSA'],
             name='Basket Size (BSA)',
-            mode='lines+markers',
+            mode='lines+markers+text', # Tambah text di line juga
             line=dict(color='#2196F3', width=3),
+            text=[f"{x/1000:.0f}k" for x in df_bs['BSA']], # Format: 123k
+            textposition='top center',
+            textfont=dict(color='#2196F3'),
             yaxis='y2'
         ))
         
         fig_gmv.update_layout(
-            height=400,
+            height=500, # Sedikit dipertinggi biar lega
             xaxis_title="Month",
             barmode='stack',
+            
+            # Sumbu Kiri (GMV)
             yaxis=dict(title="GMV Total (Rp)", side="left"),
+            
+            # Sumbu Kanan (BSA)
             yaxis2=dict(
                 title="Basket Size (Rp)",
                 overlaying="y",
                 side="right",
                 showgrid=False
             ),
+            
             legend=dict(orientation="h", y=1.1),
             hovermode="x unified",
             margin=dict(t=50, b=0, l=0, r=0)
