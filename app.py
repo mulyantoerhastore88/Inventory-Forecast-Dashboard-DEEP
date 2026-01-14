@@ -838,17 +838,26 @@ def get_last_3_months_performance(monthly_performance):
     
     return last_3_data
 
+@st.cache_data(ttl=300)
 def calculate_inventory_metrics_with_3month_avg(df_stock, df_sales, df_product):
-    """Calculate inventory metrics using 3-month average sales"""
+    """Calculate inventory metrics using 3-month average sales (FIXED: AGGREGATE STOCK FIRST)"""
     
     metrics = {}
     
-    if df_stock.empty or df_sales.empty:
+    if df_stock.empty:
         return metrics
     
     try:
-        # ADD PRODUCT INFO jika belum ada
-        df_stock = add_product_info_to_data(df_stock, df_product)
+        # --- FIX UTAMA: Agregasi Stok dari Level Batch ke Level SKU ---
+        # Kita jumlahkan dulu Stock_Qty berdasarkan SKU_ID agar 1 SKU = 1 Baris
+        df_stock_agg = df_stock.groupby('SKU_ID').agg({
+            'Stock_Qty': 'sum'
+        }).reset_index()
+        
+        # ADD PRODUCT INFO ke data yang sudah di-agregasi
+        df_stock_agg = add_product_info_to_data(df_stock_agg, df_product)
+        
+        # Siapkan Sales Data
         df_sales = add_product_info_to_data(df_sales, df_product)
         
         # Get last 3 months sales data
@@ -860,30 +869,34 @@ def calculate_inventory_metrics_with_3month_avg(df_stock, df_sales, df_product):
             else:
                 df_sales_last_3 = df_sales.copy()
         
-        # Calculate average monthly sales per SKU for last 3 months
-        if not df_sales_last_3.empty:
+        # Calculate average monthly sales per SKU
+        if not df_sales.empty and not df_sales_last_3.empty:
             avg_monthly_sales = df_sales_last_3.groupby('SKU_ID')['Sales_Qty'].mean().reset_index()
             avg_monthly_sales.columns = ['SKU_ID', 'Avg_Monthly_Sales_3M']
         else:
             avg_monthly_sales = pd.DataFrame(columns=['SKU_ID', 'Avg_Monthly_Sales_3M'])
         
-        # Merge with product info
+        # Merge Stock Aggregated dengan Product Info (redundant check but safe)
         df_inventory = pd.merge(
-            df_stock,
+            df_stock_agg,
             df_product[['SKU_ID', 'Product_Name', 'SKU_Tier', 'Brand', 'Status']],
             on='SKU_ID',
-            how='left'
+            how='left',
+            suffixes=('', '_master')
         )
         
-        # Merge with average sales
+        # Bersihkan kolom duplikat jika ada setelah merge
+        df_inventory = df_inventory.loc[:,~df_inventory.columns.duplicated()]
+        
+        # Merge dengan Average Sales
         df_inventory = pd.merge(df_inventory, avg_monthly_sales, on='SKU_ID', how='left')
         df_inventory['Avg_Monthly_Sales_3M'] = df_inventory['Avg_Monthly_Sales_3M'].fillna(0)
         
-        # Calculate cover months using 3-month average
+        # Calculate cover months
         df_inventory['Cover_Months'] = np.where(
             df_inventory['Avg_Monthly_Sales_3M'] > 0,
             df_inventory['Stock_Qty'] / df_inventory['Avg_Monthly_Sales_3M'],
-            999  # For SKUs with no sales in last 3 months
+            999  # For SKUs with no sales
         )
         
         # Categorize inventory status
@@ -895,13 +908,9 @@ def calculate_inventory_metrics_with_3month_avg(df_stock, df_sales, df_product):
         choices = ['Need Replenishment', 'Ideal/Healthy', 'High Stock']
         df_inventory['Inventory_Status'] = np.select(conditions, choices, default='Unknown')
         
-        # Get high stock items for reduction
-        high_stock_df = df_inventory[df_inventory['Inventory_Status'] == 'High Stock'].copy()
-        high_stock_df = high_stock_df.sort_values('Cover_Months', ascending=False)
-        
-        # Get low stock items
-        low_stock_df = df_inventory[df_inventory['Inventory_Status'] == 'Need Replenishment'].copy()
-        low_stock_df = low_stock_df.sort_values('Cover_Months', ascending=True)
+        # Get high/low stock items
+        high_stock_df = df_inventory[df_inventory['Inventory_Status'] == 'High Stock'].copy().sort_values('Cover_Months', ascending=False)
+        low_stock_df = df_inventory[df_inventory['Inventory_Status'] == 'Need Replenishment'].copy().sort_values('Cover_Months', ascending=True)
         
         # Tier analysis
         if 'SKU_Tier' in df_inventory.columns:
@@ -922,10 +931,13 @@ def calculate_inventory_metrics_with_3month_avg(df_stock, df_sales, df_product):
         metrics['total_skus'] = len(df_inventory)
         metrics['avg_cover'] = df_inventory[df_inventory['Cover_Months'] < 999]['Cover_Months'].mean()
         
-        # Calculate inventory value metrics
         metrics['inventory_value_score'] = (len(df_inventory[df_inventory['Inventory_Status'] == 'Ideal/Healthy']) / 
-                                         len(df_inventory) * 100) if len(df_inventory) > 0 else 0
+                                            len(df_inventory) * 100) if len(df_inventory) > 0 else 0
         
+        return metrics
+        
+    except Exception as e:
+        st.error(f"Inventory metrics error: {str(e)}")
         return metrics
         
     except Exception as e:
