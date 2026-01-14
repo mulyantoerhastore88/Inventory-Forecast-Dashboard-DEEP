@@ -2904,22 +2904,35 @@ with tab3:
     # ========================================================
     st.divider()
     
-    # Metric harus dari SKU Level agar Valuasi benar (tidak double count harga jika ada join aneh)
-    tot_val = df_view_sku['Value_Retail'].sum()
+    # A. Metric Global (Dari Data SKU Aggregated)
+    # Gunakan .get() agar aman jika kolom tidak ada, lalu pastikan numerik
+    tot_val = (df_view_sku['Stock_Qty'] * pd.to_numeric(df_view_sku.get('Floor_Price', 0), errors='coerce').fillna(0)).sum()
     tot_qty = df_view_sku['Stock_Qty'].sum()
     
-    # Metric Risk harus dari Batch Level (karena expiry per batch)
-    # Hitung value risk: Kita perlu harga di batch level untuk ini
-    if 'Floor_Price' in df_product.columns:
-        # Merge harga ke batch view temp untuk hitung value risk
-        temp_batch = pd.merge(df_view_batch, df_product[['SKU_ID', 'Floor_Price']], on='SKU_ID', how='left')
-        temp_batch['Value'] = temp_batch['Stock_Qty'] * pd.to_numeric(temp_batch['Floor_Price'], errors='coerce').fillna(0)
-        crit_val = temp_batch[temp_batch['Age_Category'].str.contains('Critical')]['Value'].sum()
-        fresh_val = temp_batch[temp_batch['Age_Category'].str.contains('Fresh')]['Value'].sum()
-    else:
-        crit_val = 0
-        fresh_val = 0
+    # B. Metric Risk (Dari Data Batch Level)
+    # Kita butuh hitung value per batch untuk tahu value barang expired
+    temp_batch = df_view_batch.copy()
+    
+    # Cek: Apakah harga sudah ada di data batch?
+    if 'Floor_Price' not in temp_batch.columns:
+        # Kalau belum ada, baru kita ambil dari Product Master
+        if 'Floor_Price' in df_product.columns:
+            temp_batch = pd.merge(temp_batch, df_product[['SKU_ID', 'Floor_Price']], on='SKU_ID', how='left')
+        else:
+            temp_batch['Floor_Price'] = 0 # Kalau di master pun gak ada
+            
+    # Pastikan harga numerik & Hitung Value Per Batch
+    # Pakai .get() lagi untuk keamanan ganda
+    price_col = pd.to_numeric(temp_batch.get('Floor_Price', 0), errors='coerce').fillna(0)
+    qty_col = pd.to_numeric(temp_batch['Stock_Qty'], errors='coerce').fillna(0)
+    
+    temp_batch['Value'] = qty_col * price_col
+    
+    # Hitung Sum berdasarkan kategori umur
+    crit_val = temp_batch[temp_batch['Age_Category'].astype(str).str.contains('Critical', case=False, na=False)]['Value'].sum()
+    fresh_val = temp_batch[temp_batch['Age_Category'].astype(str).str.contains('Fresh', case=False, na=False)]['Value'].sum()
 
+    # Tampilkan Metrics
     k1, k2, k3, k4 = st.columns(4)
     with k1: st.metric("Total Stock Value", f"Rp {tot_val:,.0f}", help="Total Valuasi Inventory (SKU Aggregated)")
     with k2: st.metric("Total Stock Qty", f"{tot_qty:,.0f}")
