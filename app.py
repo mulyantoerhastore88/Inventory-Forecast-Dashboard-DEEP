@@ -2820,18 +2820,27 @@ with tab3:
         df_inv_batch['Days_to_Expiry'] = 9999
 
     # ========================================================
-    # 2. AGGREGATION LEVEL (SKU LEVEL) - INI YANG BARU
+    # 2. AGGREGATION LEVEL (SKU LEVEL) - FIXED & ROBUST
     # ========================================================
-    # Kita harus menjumlahkan stok per SKU sebelum digabung dengan sales
-    # Group by SKU_ID
+    # Tujuan: Menjumlahkan stok dari banyak Batch menjadi satu baris per SKU
     
-    df_inv_sku = df_inv_batch.groupby('SKU_ID').agg({
-        'Stock_Qty': 'sum',
-        'Product_Name': 'first', # Ambil nama pertama yg ketemu
-        'Brand': 'first',
-        'Stock_Category': 'first', # Asumsi 1 SKU = 1 Kategori utama
-        'Anchanto_Code': 'first' if 'Anchanto_Code' in df_inv_batch.columns else 'first'
-    }).reset_index()
+    # A. Tentukan Rules Agregasi Dasar
+    # Kita pasti Group By 'SKU_ID', dan 'Stock_Qty' pasti di-SUM.
+    agg_rules = {
+        'Stock_Qty': 'sum'
+    }
+    
+    # B. Tentukan Kolom Pelengkap (Ambil 'first' / data pertama yg ketemu)
+    # Cek dulu apakah kolomnya ADA di data. Jika tidak ada, jangan dimasukkan ke rules biar gak Error.
+    potential_cols = ['Product_Name', 'Brand', 'Stock_Category', 'Anchanto_Code', 'Expiry_Date']
+    
+    for col in potential_cols:
+        if col in df_inv_batch.columns:
+            agg_rules[col] = 'first' 
+            
+    # C. Eksekusi Grouping
+    # Group berdasarkan SKU_ID, lalu terapkan rules di atas
+    df_inv_sku = df_inv_batch.groupby('SKU_ID').agg(agg_rules).reset_index()
 
     # --- C. Merge Sales & Price ke Data AGGREGATED ---
     # Merge Sales (L3M)
