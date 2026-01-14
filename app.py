@@ -21,22 +21,54 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- TAMBAHAN: CSS KHUSUS PRINT PDF (Agar Sidebar Hilang & Warna Muncul) ---
+# --- CSS KHUSUS PRINT PDF (FIX BLANK PAGE) ---
 st.markdown("""
 <style>
     @media print {
-        /* Sembunyikan sidebar saat dicetak agar data lebih lebar */
-        [data-testid="stSidebar"] {
-            display: none;
+        /* 1. Sembunyikan elemen yang tidak perlu */
+        [data-testid="stSidebar"], 
+        [data-testid="stHeader"], 
+        .stButton, 
+        .stDeployButton,
+        footer {
+            display: none !important;
         }
-        /* Sembunyikan elemen-elemen interaktif yang mengganggu di PDF */
-        .stButton, .stDeployButton, [data-testid="stHeader"] {
-            display: none;
+
+        /* 2. FIX UTAMA: Paksa container utama untuk melebar penuh */
+        /* Ini yang mengatasi masalah halaman blank */
+        [data-testid="stAppViewContainer"] {
+            overflow: visible !important;
+            position: static !important;
+            height: auto !important;
+            width: 100% !important;
+            display: block !important;
         }
-        /* Pastikan background warna tetap tercetak */
+
+        /* 3. Atur konten utama */
+        [data-testid="stMain"] {
+            overflow: visible !important;
+            position: static !important;
+            height: auto !important;
+            width: 100% !important;
+            padding-top: 0px !important;
+            margin: 0px !important;
+        }
+        
+        /* 4. Pastikan blok konten di dalamnya juga terlihat */
+        [data-testid="stBlock"] {
+            overflow: visible !important;
+            height: auto !important;
+        }
+
+        /* 5. Pastikan warna background grafik tercetak (Force Color) */
         * {
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+        }
+        
+        /* Opsional: Ubah teks jadi hitam semua biar kontras di kertas */
+        body {
+            color: black !important;
         }
     }
 </style>
