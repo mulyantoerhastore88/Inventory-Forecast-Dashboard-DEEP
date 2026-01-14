@@ -4660,16 +4660,16 @@ with tab9:
     else:
         st.error("❌ No Reseller forecast data available")
 
-# --- TAB 10: FULFILLMENT COST ANALYSIS (FIXED & SAFE LAYOUT) ---
+# --- TAB 10: FULFILLMENT COST ANALYSIS (OPTIMIZED LOGIC) ---
 with tab10:
     st.subheader("🚚 Fulfillment Cost Analysis (BS)")
-    st.markdown("**Analisis Biaya Operasional & Basket Size (Business Support)**")
+    st.markdown("**Analisis Efisiensi: Business View (GMV) vs Operational View (Order)**")
     
     # Ambil data
     df_bs = all_data.get('fulfillment', pd.DataFrame())
     
     if not df_bs.empty:
-        # --- 1. KEY METRICS (HEADER) ---
+        # --- 1. KEY METRICS ---
         last_row = df_bs.iloc[-1]
         prev_row = df_bs.iloc[-2] if len(df_bs) > 1 else last_row
         last_month_name = last_row['Month']
@@ -4677,183 +4677,158 @@ with tab10:
         col_k1, col_k2, col_k3, col_k4 = st.columns(4)
         
         with col_k1:
-            curr_cost = last_row['Total Cost']
-            prev_cost = prev_row['Total Cost']
-            delta_cost = (curr_cost - prev_cost) / prev_cost * 100 if prev_cost > 0 else 0
-            st.metric(f"Total Cost ({last_month_name})", f"Rp {curr_cost:,.0f}", f"{delta_cost:+.1f}%", delta_color="inverse")
+            curr_gmv = last_row['GMV (Fullfil By BS)']
+            st.metric(f"GMV Fulfilled by BS", f"Rp {curr_gmv:,.0f}")
             
         with col_k2:
-            curr_bsa = last_row['BSA'] # Basket Size Average
-            prev_bsa = prev_row['BSA']
-            delta_bsa = (curr_bsa - prev_bsa) / prev_bsa * 100 if prev_bsa > 0 else 0
-            st.metric(f"BSA (Avg Order Value)", f"Rp {curr_bsa:,.0f}", f"{delta_bsa:+.1f}%")
-            
-        with col_k3:
-            curr_gmv = last_row['GMV (Fullfil By BS)']
-            prev_gmv = prev_row['GMV (Fullfil By BS)']
-            delta_gmv = (curr_gmv - prev_gmv) / prev_gmv * 100 if prev_gmv > 0 else 0
-            st.metric(f"GMV Fulfilled by BS", f"Rp {curr_gmv:,.0f}", f"{delta_gmv:+.1f}%")
-            
-        with col_k4:
             curr_pct = last_row['%Cost']
             prev_pct = prev_row['%Cost']
             delta_pct = (curr_pct - prev_pct)
-            st.metric(f"% Cost to GMV", f"{curr_pct:.2f}%", f"{delta_pct:+.2f}%", delta_color="inverse")
+            st.metric(f"% Cost Ratio", f"{curr_pct:.2f}%", f"{delta_pct:+.2f}%", delta_color="inverse")
+            
+        with col_k3:
+            curr_cost = last_row['Total Cost']
+            delta_cost = (curr_cost - prev_row['Total Cost']) / prev_row['Total Cost'] * 100 if prev_row['Total Cost'] > 0 else 0
+            st.metric(f"Total Cost", f"Rp {curr_cost:,.0f}", f"{delta_cost:+.1f}%", delta_color="inverse")
+            
+        with col_k4:
+            curr_ord = last_row['Total Order(BS)']
+            delta_ord = (curr_ord - prev_row['Total Order(BS)']) / prev_row['Total Order(BS)'] * 100 if prev_row['Total Order(BS)'] > 0 else 0
+            st.metric(f"Total Order", f"{curr_ord:,.0f}", f"{delta_ord:+.1f}%")
 
         st.divider()
         
-        # --- 2. COST & EFFICIENCY CHARTS ---
-        c1, c2 = st.columns([2, 1])
+        # --- 2. DUAL CHARTS (THE "YAHUT" VISUALIZATION) ---
+        c1, c2 = st.columns([1, 1])
         
-        # CHART 1: Cost Efficiency (Dual Axis) - FIXED
+        # --- CHART KIRI: BUSINESS HEALTH (GMV vs % COST) ---
         with c1:
-            st.subheader("📊 Cost Efficiency Trend")
+            st.subheader("💰 Business Efficiency")
+            st.caption("Apakah kenaikan GMV diimbangi dengan penurunan % Cost?")
             
-            fig_eff = go.Figure()
+            fig_biz = go.Figure()
             
-            # Bar: Total Order (Kiri)
-            fig_eff.add_trace(go.Bar(
+            # Bar: GMV (Kiri)
+            fig_biz.add_trace(go.Bar(
                 x=df_bs['Month'], 
-                y=df_bs['Total Order(BS)'], 
-                name='Total Orders',
-                marker_color='#667eea',
+                y=df_bs['GMV (Fullfil By BS)'], 
+                name='GMV Fulfillment',
+                marker_color='#667eea', # Ungu Kebiruan
                 opacity=0.7
             ))
             
             # Line: % Cost (Kanan)
-            fig_eff.add_trace(go.Scatter(
+            fig_biz.add_trace(go.Scatter(
                 x=df_bs['Month'], 
                 y=df_bs['%Cost'], 
                 name='% Cost Ratio',
                 mode='lines+markers+text',
-                line=dict(color='#FF5252', width=3),
+                line=dict(color='#FF5252', width=3), # Merah
                 text=[f"{x:.2f}%" for x in df_bs['%Cost']],
                 textposition='top center',
-                yaxis='y2' # Lempar ke sumbu kanan
+                yaxis='y2'
             ))
             
-            # Layout Sederhana (Tanpa Font Styling yg bikin error)
-            fig_eff.update_layout(
-                height=400,
+            fig_biz.update_layout(
+                height=450,
                 xaxis_title="Month",
-                
-                # Sumbu Kiri
-                yaxis=dict(title="Total Order (Bar)"),
-                
-                # Sumbu Kanan
+                yaxis=dict(title="GMV (Rp)"),
                 yaxis2=dict(
-                    title="% Cost Ratio (Line)", 
+                    title="% Cost Ratio", 
                     overlaying="y", 
                     side="right", 
                     showgrid=False
                 ),
-                
                 legend=dict(orientation="h", y=1.1),
                 margin=dict(l=0, r=0, t=30, b=0),
                 hovermode="x unified"
             )
-            st.plotly_chart(fig_eff, use_container_width=True)
+            st.plotly_chart(fig_biz, use_container_width=True)
             
-        # CHART 2: Total Cost Trend (Single Axis)
+        # --- CHART KANAN: OPERATIONAL LOAD (COST vs ORDER) ---
         with c2:
-            st.subheader("💰 Total Cost Trend")
+            st.subheader("⚙️ Operational Load")
+            st.caption("Korelasi antara Total Cost dengan Volume Order")
             
-            fig_cost = go.Figure()
+            fig_ops = go.Figure()
             
-            fig_cost.add_trace(go.Scatter(
+            # Area: Total Cost (Kiri) - Kita pakai Area biar kelihatan "Beban" biaya
+            fig_ops.add_trace(go.Scatter(
                 x=df_bs['Month'], 
                 y=df_bs['Total Cost'], 
                 name='Total Cost',
                 fill='tozeroy',
-                mode='lines+markers',
-                line=dict(color='#FF9800', width=2),
-                hovertemplate='Rp %{y:,.0f}'
+                mode='lines',
+                line=dict(color='#FF9800', width=0), # Oranye, borderless
+                hovertemplate='Cost: Rp %{y:,.0f}'
             ))
             
-            fig_cost.update_layout(
-                height=400,
+            # Line: Total Order (Kanan)
+            fig_ops.add_trace(go.Scatter(
+                x=df_bs['Month'], 
+                y=df_bs['Total Order(BS)'], 
+                name='Total Orders',
+                mode='lines+markers',
+                line=dict(color='#2196F3', width=3), # Biru
+                yaxis='y2',
+                hovertemplate='Order: %{y:,.0f}'
+            ))
+            
+            fig_ops.update_layout(
+                height=450,
                 xaxis_title="Month",
                 yaxis=dict(title="Total Cost (Rp)"),
+                yaxis2=dict(
+                    title="Total Order (Qty)", 
+                    overlaying="y", 
+                    side="right", 
+                    showgrid=False
+                ),
+                legend=dict(orientation="h", y=1.1),
                 margin=dict(l=0, r=0, t=30, b=0),
-                showlegend=False
+                hovermode="x unified"
             )
-            st.plotly_chart(fig_cost, use_container_width=True)
+            st.plotly_chart(fig_ops, use_container_width=True)
 
         st.divider()
         
-        # --- 3. GMV CONTRIBUTION & BSA (DUAL AXIS) - FIXED ---
-        st.subheader("🏢 GMV Contribution & Basket Size (BSA)")
-        st.caption("Bar: Komposisi GMV Fulfillment | Line: Rata-rata Nilai Order (BSA)")
+        # --- 3. BSA TREND (BASKET SIZE) ---
+        st.subheader("🛒 Basket Size Trend (BSA)")
+        st.caption("Rata-rata nilai belanja per order (Higher is usually Better for Cost Ratio)")
         
-        # Hitung GMV Non-BS
-        df_bs['GMV Non-BS'] = df_bs['GMV Total (MP)'] - df_bs['GMV (Fullfil By BS)']
+        fig_bsa = go.Figure()
         
-        fig_gmv = go.Figure()
-        
-        # Stacked Bar 1: GMV BS
-        fig_gmv.add_trace(go.Bar(
-            x=df_bs['Month'],
-            y=df_bs['GMV (Fullfil By BS)'],
-            name='Fulfilled by BS',
-            marker_color='#4CAF50'
-        ))
-        
-        # Stacked Bar 2: GMV Non-BS
-        fig_gmv.add_trace(go.Bar(
-            x=df_bs['Month'],
-            y=df_bs['GMV Non-BS'],
-            name='Other Fulfillment',
-            marker_color='#E0E0E0'
-        ))
-        
-        # Line Chart: BSA (Kanan)
-        fig_gmv.add_trace(go.Scatter(
+        fig_bsa.add_trace(go.Scatter(
             x=df_bs['Month'],
             y=df_bs['BSA'],
-            name='BSA (Avg Order Value)',
-            mode='lines+markers',
-            line=dict(color='#2196F3', width=3),
-            yaxis='y2' # Lempar ke sumbu kanan
+            name='BSA',
+            mode='lines+markers+text',
+            line=dict(color='#4CAF50', width=3), # Hijau
+            text=[f"{x/1000:.0f}k" for x in df_bs['BSA']], # Format 123k
+            textposition='top center',
+            fill='tozeroy', # Area hijau di bawah
+            fillcolor='rgba(76, 175, 80, 0.1)'
         ))
         
-        # Layout Sederhana (Tanpa Font Styling yg bikin error)
-        fig_gmv.update_layout(
-            height=450,
+        fig_bsa.update_layout(
+            height=300,
             xaxis_title="Month",
-            barmode='stack',
-            
-            # Sumbu Kiri (GMV)
-            yaxis=dict(
-                title="GMV Value (Rp)",
-                side="left"
-            ),
-            
-            # Sumbu Kanan (BSA)
-            yaxis2=dict(
-                title="BSA / Avg Order (Rp)",
-                overlaying="y",
-                side="right",
-                showgrid=False
-            ),
-            
-            legend=dict(orientation="h", y=1.1),
-            hovermode="x unified",
-            margin=dict(t=50, b=0, l=0, r=0)
+            yaxis=dict(title="Basket Size Average (Rp)"),
+            margin=dict(l=0, r=0, t=30, b=0),
+            hovermode="x unified"
         )
+        st.plotly_chart(fig_bsa, use_container_width=True)
         
-        st.plotly_chart(fig_gmv, use_container_width=True)
-        
-        # --- 4. RAW DATA TABLE ---
+        # --- 4. RAW DATA ---
         with st.expander("📋 View Detail Data"):
             df_disp = df_bs.copy()
-            curr_cols = ['Total Order(BS)', 'GMV (Fullfil By BS)', 'GMV Total (MP)', 'Total Cost', 'BSA']
-            for c in curr_cols:
-                if c in df_disp.columns:
-                    df_disp[c] = df_disp[c].apply(lambda x: f"{x:,.0f}")
-            
-            if '%Cost' in df_disp.columns:
-                df_disp['%Cost'] = df_disp['%Cost'].apply(lambda x: f"{x:.2f}%")
-            
+            # Format
+            for c in df_disp.columns:
+                if c != 'Month' and c != 'Month_Date':
+                    if '%Cost' in c:
+                        df_disp[c] = df_disp[c].apply(lambda x: f"{x:.2f}%")
+                    else:
+                        df_disp[c] = df_disp[c].apply(lambda x: f"{x:,.0f}")
             st.dataframe(df_disp, use_container_width=True)
 
     else:
