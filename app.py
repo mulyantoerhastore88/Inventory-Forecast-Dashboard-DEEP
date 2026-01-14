@@ -4749,11 +4749,11 @@ with tab10:
             
         with c2:
             st.subheader("💰 Cost Structure Trend (Dual Axis)")
-            # Membandingkan Total Cost (Kiri) vs BSA (Kanan) karena skala angka jauh berbeda
+            # Membandingkan Total Cost (Kiri) vs BSA (Kanan)
             
             fig_area = go.Figure()
             
-            # Trace 1: Total Cost (Sumbu Kiri - Jutaan) - Area Chart
+            # 1. Total Cost (Sumbu Kiri - Area Chart - Oranye)
             fig_area.add_trace(go.Scatter(
                 x=df_bs['Month'], 
                 y=df_bs['Total Cost'], 
@@ -4763,43 +4763,47 @@ with tab10:
                 hovertemplate='Total: Rp %{y:,.0f}'
             ))
             
-            # Trace 2: BSA (Sumbu Kanan - Ratusan Ribu) - Line Chart Tebal
+            # 2. BSA (Sumbu Kanan - Line Chart - Hijau)
             fig_area.add_trace(go.Scatter(
                 x=df_bs['Month'], 
                 y=df_bs['BSA'], 
                 name='BSA Cost',
-                mode='lines+markers', # Pakai marker biar kelihatan titiknya
-                line=dict(color='#4CAF50', width=4), # Garis lebih tebal biar standout
-                yaxis='y2', # <--- KUNCI: Lempar ke Sumbu Kanan
+                mode='lines+markers',
+                line=dict(color='#4CAF50', width=3),
+                yaxis='y2', # <--- KUNCI DUAL AXIS
                 hovertemplate='BSA: Rp %{y:,.0f}'
             ))
             
+            # 3. Layout Setting (Hati-hati di sini)
             fig_area.update_layout(
                 height=400,
                 xaxis_title="Month",
                 
-                # Sumbu Kiri (Total Cost)
+                # Sumbu Y Kiri (Utama)
                 yaxis=dict(
-                    title="Total Cost (Rp)", 
+                    title="Total Cost (Rp)",
                     titlefont=dict(color="#FF9800"),
                     tickfont=dict(color="#FF9800"),
                     side="left"
                 ),
                 
-                # Sumbu Kanan (BSA)
+                # Sumbu Y Kanan (Secondary)
                 yaxis2=dict(
                     title="BSA Cost (Rp)",
                     titlefont=dict(color="#4CAF50"),
                     tickfont=dict(color="#4CAF50"),
+                    anchor="x",
                     overlaying="y",
                     side="right",
-                    showgrid=False # Matikan grid kanan biar gak pusing
+                    showgrid=False
                 ),
                 
-                margin=dict(l=0, r=0, t=30, b=0),
+                # Legend & Margin
                 legend=dict(orientation="h", y=1.1),
+                margin=dict(l=0, r=0, t=30, b=0),
                 hovermode="x unified"
             )
+            
             st.plotly_chart(fig_area, use_container_width=True)
 
         st.divider()
