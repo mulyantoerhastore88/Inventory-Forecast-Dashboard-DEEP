@@ -353,8 +353,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- Judul Dashboard ---
-st.markdown('<h1 class="main-header">💰 INVENTORY INTELLIGENCE PRO DASHBOARD</h1>', unsafe_allow_html=True)
-st.caption(f"🚀 Professional Inventory Control & Financial Analytics | Real-time Insights | Updated: {datetime.now().strftime('%d %B %Y %H:%M')}")
+st.markdown('<h1 class="main-header">💰 INVENTORY & FORECAST PRO DASHBOARD</h1>', unsafe_allow_html=True)
+st.caption(f"🚀 Inventory Control & Forecast Analytics - D2C Demand Planner Mulyanto | Real-time Insights | Updated: {datetime.now().strftime('%d %B %Y %H:%M')}")
 
 # --- ====================================================== ---
 # ---                KONEKSI & LOAD DATA                    ---
