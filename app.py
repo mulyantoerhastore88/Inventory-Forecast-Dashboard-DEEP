@@ -2868,7 +2868,7 @@ with tab2:
                     avg_cover = tier_inv['Avg_Cover_Months'].mean()
                     st.metric("Average Cover All Tiers", f"{avg_cover:.1f} months")
 
-# --- TAB 3: INVENTORY ANALYSIS (WITH COVERAGE MONTHS) ---
+# --- TAB 3: INVENTORY ANALYSIS (FIXED VERSION) ---
 with tab3:
     st.subheader("📦 Inventory Health & Aging Analysis")
     st.markdown("#### **Professional Stock Management Dashboard**")
@@ -2901,7 +2901,26 @@ with tab3:
         # Bersihkan Nama Kategori
         df_batch['Stock_Category'] = df_batch['Stock_Category'].astype(str).str.strip()
         
-        # 2. LOGIC UMUR EXPIRED - IMPROVED VERSION
+        # 2. TAMBAHKAN STATUS DARI PRODUCT MASTER
+        if not df_product.empty and 'SKU_ID' in df_batch.columns:
+            # Ambil kolom Status dari Product Master
+            product_status = df_product[['SKU_ID', 'Status']].copy()
+            product_status['Status'] = product_status['Status'].astype(str).str.strip()
+            
+            # Merge dengan stock data
+            df_batch = pd.merge(
+                df_batch, 
+                product_status, 
+                on='SKU_ID', 
+                how='left'
+            )
+            
+            # Fill missing status
+            df_batch['Status'] = df_batch['Status'].fillna('Unknown')
+        else:
+            df_batch['Status'] = 'Unknown'
+        
+        # 3. LOGIC UMUR EXPIRED - IMPROVED VERSION
         def get_expiry_desc(row):
             """Enhanced expiry categorization"""
             try:
@@ -2973,6 +2992,12 @@ with tab3:
         critical_qty = critical_items['Stock_Qty'].sum()
         critical_skus = critical_items['SKU_ID'].nunique()
         
+        # Status distribution
+        if 'Status' in df_batch.columns:
+            active_count = df_batch[df_batch['Status'].str.upper() == 'ACTIVE']['SKU_ID'].nunique()
+        else:
+            active_count = total_skus
+        
         # Create summary cards
         col1, col2, col3, col4 = st.columns(4)
         
@@ -3004,8 +3029,8 @@ with tab3:
                         border-radius: 12px; padding: 1.5rem; color: white; 
                         box-shadow: 0 6px 20px rgba(255, 152, 0, 0.3);">
                 <div style="font-size: 0.9rem; opacity: 0.9;">ACTIVE SKUS</div>
-                <div style="font-size: 1.8rem; font-weight: 800; margin: 0.5rem 0;">{total_skus:,}</div>
-                <div style="font-size: 0.8rem;">Unique products</div>
+                <div style="font-size: 1.8rem; font-weight: 800; margin: 0.5rem 0;">{active_count:,}</div>
+                <div style="font-size: 0.8rem;">{total_skus-active_count:,} Inactive</div>
             </div>
             """, unsafe_allow_html=True)
         
@@ -3031,13 +3056,18 @@ with tab3:
         st.caption("**Analyzing Regular SKUs Only** | Thresholds: <0.8 months = Need Replenishment | 0.8-1.5 months = Ideal | >1.5 months = Over Stock")
         
         # Identifikasi Regular vs Non-Regular SKUs
-        # Asumsi: Regular = SKU yang memiliki sales history dan forecast
-        # Non-Regular = SKU yang tidak ada forecast (Gimmick, Clearance, dll)
+        # Asumsi: Regular = SKU Active yang memiliki sales history dan forecast
+        # Non-Regular = SKU Inactive atau tidak ada forecast
         
         # Helper function untuk identifikasi SKU Regular
-        def identify_regular_skus(df_stock, df_sales, df_forecast):
-            """Identify Regular SKUs based on sales and forecast history"""
+        def identify_regular_skus(df_stock, df_sales, df_forecast, df_product):
+            """Identify Regular SKUs based on sales, forecast, and active status"""
             regular_skus = []
+            
+            # SKU dengan status Active di Product Master
+            if not df_product.empty and 'Status' in df_product.columns:
+                active_skus = df_product[df_product['Status'].str.upper() == 'ACTIVE']['SKU_ID'].unique().tolist()
+                regular_skus.extend(active_skus)
             
             # SKU dengan sales dalam 3 bulan terakhir
             if not df_sales.empty:
@@ -3052,25 +3082,20 @@ with tab3:
                 forecast_skus = df_forecast['SKU_ID'].unique().tolist()
                 regular_skus.extend(forecast_skus)
             
-            # SKU yang ada di master product dengan status Active
-            if 'product_active' in all_data:
-                active_skus = all_data['product_active']['SKU_ID'].unique().tolist()
-                regular_skus.extend(active_skus)
-            
             # Remove duplicates
             regular_skus = list(set(regular_skus))
             return regular_skus
         
         # Get Regular SKUs
-        regular_skus = identify_regular_skus(df_stock, df_sales, df_forecast)
+        regular_skus = identify_regular_skus(df_batch, df_sales, df_forecast, df_product)
         
         # Add Regular/Non-Regular classification
         df_batch['SKU_Type'] = df_batch['SKU_ID'].apply(
             lambda x: 'Regular' if x in regular_skus else 'Non-Regular'
         )
         
-        # Filter hanya Regular SKUs untuk coverage analysis
-        df_regular = df_batch[df_batch['SKU_Type'] == 'Regular'].copy()
+        # Filter hanya Regular SKUs untuk coverage analysis (dan Active status)
+        df_regular = df_batch[(df_batch['SKU_Type'] == 'Regular') & (df_batch['Status'].str.upper() == 'ACTIVE')].copy()
         
         if not df_regular.empty:
             # Calculate coverage months
@@ -3121,8 +3146,9 @@ with tab3:
             choices = ['Need Replenishment', 'Ideal/Healthy', 'High Stock']
             df_coverage['Coverage_Status'] = np.select(conditions, choices, default='Unknown')
             
-            # Add product info
-            df_coverage = add_product_info_to_data(df_coverage, df_product)
+            # Add product info (jika belum ada)
+            if 'Product_Name' not in df_coverage.columns:
+                df_coverage = add_product_info_to_data(df_coverage, df_product)
             
             # ============================================
             # COVERAGE ANALYSIS VISUALIZATION
@@ -3164,11 +3190,12 @@ with tab3:
                 )
             
             with coverage_col4:
-                avg_cover = df_coverage[df_coverage['Cover_Months'] < 999]['Cover_Months'].mean()
+                valid_coverage = df_coverage[df_coverage['Cover_Months'] < 999]
+                avg_cover = valid_coverage['Cover_Months'].mean() if not valid_coverage.empty else 0
                 st.metric(
                     "📊 Avg Coverage", 
                     f"{avg_cover:.1f} months",
-                    "All Regular SKUs"
+                    f"{len(valid_coverage)} SKUs"
                 )
             
             # Row 2: Coverage Distribution Chart
@@ -3259,7 +3286,8 @@ with tab3:
             sort_by = st.selectbox(
                 "Sort By",
                 options=['Cover_Months (Desc)', 'Cover_Months (Asc)', 'Stock_Qty (Desc)', 'Avg_Monthly_Sales_3M (Desc)'],
-                index=0
+                index=0,
+                key="coverage_sort"
             )
             
             if sort_by == 'Cover_Months (Desc)':
@@ -3272,7 +3300,7 @@ with tab3:
                 df_coverage_filtered = df_coverage_filtered.sort_values('Avg_Monthly_Sales_3M', ascending=False)
             
             # Display table
-            display_cols = ['SKU_ID', 'Product_Name', 'Brand', 'Stock_Category', 
+            display_cols = ['SKU_ID', 'Product_Name', 'Brand', 'Status', 'Stock_Category', 
                           'Stock_Qty', 'Avg_Monthly_Sales_3M', 'Cover_Months', 'Coverage_Status']
             
             available_cols = [col for col in display_cols if col in df_coverage_filtered.columns]
@@ -3316,13 +3344,19 @@ with tab3:
                 data=csv_coverage,
                 file_name=f"inventory_coverage_analysis_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv",
-                use_container_width=True
+                use_container_width=True,
+                key="export_coverage"
             )
         else:
-            st.warning("⚠️ No Regular SKUs found for coverage analysis")
+            st.warning("⚠️ No Active Regular SKUs found for coverage analysis")
+            
+            # Show SKU type distribution
+            if 'SKU_Type' in df_batch.columns:
+                sku_type_counts = df_batch['SKU_Type'].value_counts()
+                st.info(f"**SKU Distribution:** {sku_type_counts.get('Regular', 0)} Regular, {sku_type_counts.get('Non-Regular', 0)} Non-Regular")
         
         # ============================================
-        # SECTION 2: INVENTORY MATRIX (PIVOT TABLE - EXCEL STYLE)
+        # SECTION 2: INVENTORY MATRIX (PIVOT TABLE - FIXED VERSION)
         # ============================================
         st.markdown("---")
         st.markdown("### 🗓️ Inventory Matrix: Category vs Expiry")
@@ -3335,9 +3369,7 @@ with tab3:
             index='Stock_Category', 
             columns='Expiry_Category', 
             aggfunc='sum', 
-            fill_value=0,
-            margins=True,
-            margins_name='TOTAL'
+            fill_value=0
         )
         
         # Reorder columns logically
@@ -3353,97 +3385,137 @@ with tab3:
         
         # Filter hanya kolom yang ada
         existing_cols = [col for col in expiry_order if col in pivot.columns]
-        pivot = pivot[existing_cols]
         
-        # Sort rows by total
-        pivot = pivot.sort_values('TOTAL', ascending=False)
-        
-        # Create styled dataframe dengan heatmap
-        def color_heatmap(val):
-            """Color coding based on value"""
-            if val == 0:
-                return 'background-color: #F5F5F5; color: #999'
-            elif val < 100:
-                return 'background-color: #E8F5E9; color: #000'
-            elif val < 1000:
-                return 'background-color: #C8E6C9; color: #000'
-            elif val < 5000:
-                return 'background-color: #A5D6A7; color: #000'
-            elif val < 10000:
-                return 'background-color: #81C784; color: #000'
-            else:
-                return 'background-color: #4CAF50; color: white; font-weight: bold'
-        
-        # Apply styling
-        styled_pivot = pivot.style.applymap(color_heatmap)
-        
-        # Add number formatting
-        styled_pivot = styled_pivot.format("{:,.0f}")
-        
-        # Display the pivot table
-        st.dataframe(
-            styled_pivot,
-            use_container_width=True,
-            height=min(600, (len(pivot) + 2) * 35)
-        )
-        
-        # Summary statistics bawah pivot
-        st.markdown("#### 📊 Matrix Statistics")
-        
-        col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
-        
-        with col_stat1:
-            total_cells = (len(pivot) - 1) * (len(pivot.columns) - 1)  # Exclude totals
-            zero_cells = (pivot.iloc[:-1, :-1] == 0).sum().sum()
-            fill_rate = ((total_cells - zero_cells) / total_cells * 100) if total_cells > 0 else 0
-            st.metric("Matrix Fill Rate", f"{fill_rate:.1f}%")
-        
-        with col_stat2:
-            max_category = pivot['TOTAL'].idxmax() if 'TOTAL' in pivot.columns else "N/A"
-            max_value = pivot['TOTAL'].max() if 'TOTAL' in pivot.columns else 0
-            st.metric("Largest Category", f"{max_category}", delta=f"{max_value:,.0f} units")
-        
-        with col_stat3:
-            expired_total = pivot.get('❌ EXPIRED', pd.Series([0])).iloc[-2] if '❌ EXPIRED' in pivot.columns else 0
-            st.metric("Expired Stock", f"{expired_total:,.0f}", delta_color="inverse")
-        
-        with col_stat4:
-            critical_total = pivot.get('🚨 Critical (<30 days)', pd.Series([0])).iloc[-2] if '🚨 Critical (<30 days)' in pivot.columns else 0
-            st.metric("Critical Stock", f"{critical_total:,.0f}", delta_color="inverse")
-        
-        # ============================================
-        # SECTION 3: VISUALIZATION - HEATMAP CHART
-        # ============================================
-        st.markdown("---")
-        st.markdown("### 🔥 Visual Heatmap")
-        
-        # Prepare data for Plotly heatmap (exclude totals)
-        heatmap_data = pivot.iloc[:-1, :-1]  # Exclude TOTAL row and column
-        
-        if not heatmap_data.empty:
-            fig = go.Figure(data=go.Heatmap(
-                z=heatmap_data.values,
-                x=heatmap_data.columns,
-                y=heatmap_data.index,
-                colorscale='RdYlGn_r',  # Reversed: Red (low) -> Green (high)
-                text=heatmap_data.values,
-                texttemplate='%{text:,.0f}',
-                textfont={"size": 11},
-                hovertemplate='<b>%{y}</b><br>%{x}: %{z:,.0f} units<extra></extra>',
-                colorbar=dict(title="Quantity", titleside="right")
-            ))
+        # Pastikan ada kolom yang bisa ditampilkan
+        if existing_cols:
+            pivot = pivot[existing_cols]
             
-            fig.update_layout(
-                height=max(400, len(heatmap_data) * 40),
-                title="Inventory Distribution Heatmap",
-                xaxis_title="Expiry Status",
-                yaxis_title="Stock Category",
-                xaxis={'side': 'top'},
-                yaxis={'autorange': 'reversed'},  # Reverse untuk match pivot table
-                margin=dict(l=0, r=0, t=50, b=0)
+            # Hitung TOTAL row manual
+            pivot.loc['TOTAL'] = pivot.sum()
+            
+            # Hitung TOTAL column manual
+            pivot['TOTAL'] = pivot.sum(axis=1)
+            
+            # Sort rows by total (exclude TOTAL row dari sorting)
+            pivot_for_sorting = pivot.drop('TOTAL', errors='ignore')
+            if 'TOTAL' in pivot_for_sorting.index:
+                pivot_for_sorting = pivot_for_sorting.drop('TOTAL')
+            
+            # Sort by TOTAL column
+            pivot_for_sorting = pivot_for_sorting.sort_values('TOTAL', ascending=False)
+            
+            # Gabungkan kembali dengan TOTAL row
+            pivot_sorted = pd.concat([pivot_for_sorting, pivot.loc[['TOTAL']]])
+            
+            # Create styled dataframe dengan heatmap
+            def color_heatmap(val):
+                """Color coding based on value"""
+                if val == 0:
+                    return 'background-color: #F5F5F5; color: #999'
+                elif val < 100:
+                    return 'background-color: #E8F5E9; color: #000'
+                elif val < 1000:
+                    return 'background-color: #C8E6C9; color: #000'
+                elif val < 5000:
+                    return 'background-color: #A5D6A7; color: #000'
+                elif val < 10000:
+                    return 'background-color: #81C784; color: #000'
+                else:
+                    return 'background-color: #4CAF50; color: white; font-weight: bold'
+            
+            # Apply styling
+            styled_pivot = pivot_sorted.style.applymap(color_heatmap)
+            
+            # Add number formatting
+            styled_pivot = styled_pivot.format("{:,.0f}")
+            
+            # Highlight TOTAL row
+            def highlight_total(row):
+                if row.name == 'TOTAL':
+                    return ['background-color: #E3F2FD; font-weight: bold'] * len(row)
+                return [''] * len(row)
+            
+            styled_pivot = styled_pivot.apply(highlight_total, axis=1)
+            
+            # Display the pivot table
+            st.dataframe(
+                styled_pivot,
+                use_container_width=True,
+                height=min(600, (len(pivot_sorted) + 2) * 35)
             )
             
-            st.plotly_chart(fig, use_container_width=True)
+            # Summary statistics bawah pivot
+            st.markdown("#### 📊 Matrix Statistics")
+            
+            col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+            
+            with col_stat1:
+                total_cells = (len(pivot_sorted) - 1) * (len(pivot_sorted.columns) - 1)  # Exclude totals
+                zero_cells = (pivot_sorted.iloc[:-1, :-1] == 0).sum().sum()
+                fill_rate = ((total_cells - zero_cells) / total_cells * 100) if total_cells > 0 else 0
+                st.metric("Matrix Fill Rate", f"{fill_rate:.1f}%")
+            
+            with col_stat2:
+                # Exclude TOTAL dari pencarian max
+                pivot_without_total = pivot_sorted.drop('TOTAL', errors='ignore')
+                if not pivot_without_total.empty and 'TOTAL' in pivot_without_total.columns:
+                    max_category = pivot_without_total['TOTAL'].idxmax()
+                    max_value = pivot_without_total['TOTAL'].max()
+                    st.metric("Largest Category", f"{max_category}", delta=f"{max_value:,.0f} units")
+                else:
+                    st.metric("Largest Category", "N/A")
+            
+            with col_stat3:
+                if '❌ EXPIRED' in pivot_sorted.columns:
+                    # Ambil total expired (exclude TOTAL row)
+                    expired_total = pivot_sorted['❌ EXPIRED'].iloc[:-1].sum()
+                    st.metric("Expired Stock", f"{expired_total:,.0f}", delta_color="inverse")
+                else:
+                    st.metric("Expired Stock", "0")
+            
+            with col_stat4:
+                if '🚨 Critical (<30 days)' in pivot_sorted.columns:
+                    # Ambil total critical (exclude TOTAL row)
+                    critical_total = pivot_sorted['🚨 Critical (<30 days)'].iloc[:-1].sum()
+                    st.metric("Critical Stock", f"{critical_total:,.0f}", delta_color="inverse")
+                else:
+                    st.metric("Critical Stock", "0")
+            
+            # ============================================
+            # SECTION 3: VISUALIZATION - HEATMAP CHART
+            # ============================================
+            st.markdown("---")
+            st.markdown("### 🔥 Visual Heatmap")
+            
+            # Prepare data for Plotly heatmap (exclude totals)
+            heatmap_data = pivot_sorted.iloc[:-1, :-1]  # Exclude TOTAL row and column
+            
+            if not heatmap_data.empty:
+                fig = go.Figure(data=go.Heatmap(
+                    z=heatmap_data.values,
+                    x=heatmap_data.columns,
+                    y=heatmap_data.index,
+                    colorscale='RdYlGn_r',  # Reversed: Red (low) -> Green (high)
+                    text=heatmap_data.values,
+                    texttemplate='%{text:,.0f}',
+                    textfont={"size": 11},
+                    hovertemplate='<b>%{y}</b><br>%{x}: %{z:,.0f} units<extra></extra>',
+                    colorbar=dict(title="Quantity", titleside="right")
+                ))
+                
+                fig.update_layout(
+                    height=max(400, len(heatmap_data) * 40),
+                    title="Inventory Distribution Heatmap",
+                    xaxis_title="Expiry Status",
+                    yaxis_title="Stock Category",
+                    xaxis={'side': 'top'},
+                    yaxis={'autorange': 'reversed'},  # Reverse untuk match pivot table
+                    margin=dict(l=0, r=0, t=50, b=0)
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("No expiry categories found for matrix analysis")
         
         # ============================================
         # SECTION 4: DRILL-DOWN ANALYSIS
@@ -3452,7 +3524,7 @@ with tab3:
         st.markdown("### 🔍 Drill-Down Analysis")
         
         # Filter options
-        col_filter1, col_filter2 = st.columns(2)
+        col_filter1, col_filter2, col_filter3 = st.columns(3)
         
         with col_filter1:
             selected_category = st.selectbox(
@@ -3470,6 +3542,14 @@ with tab3:
                 key="drill_expiry"
             )
         
+        with col_filter3:
+            selected_status = st.selectbox(
+                "Select SKU Status",
+                options=['All'] + sorted(df_batch['Status'].unique().tolist()),
+                index=0,
+                key="drill_sku_status"
+            )
+        
         # Apply filters
         filtered_drill = df_batch.copy()
         
@@ -3479,13 +3559,21 @@ with tab3:
         if selected_expiry != 'All':
             filtered_drill = filtered_drill[filtered_drill['Expiry_Category'] == selected_expiry]
         
+        if selected_status != 'All':
+            filtered_drill = filtered_drill[filtered_drill['Status'] == selected_status]
+        
         if not filtered_drill.empty:
             # Display detailed table
             st.markdown(f"**📋 Detailed SKU List ({len(filtered_drill)} items)**")
             
             # Prepare display columns
-            display_cols = ['SKU_ID', 'Product_Name', 'Stock_Category', 'Expiry_Category', 
-                          'Stock_Qty', 'Expiry_Date', 'SKU_Type']
+            display_cols = ['SKU_ID', 'Product_Name', 'Status', 'SKU_Type', 'Stock_Category', 
+                          'Expiry_Category', 'Stock_Qty', 'Expiry_Date']
+            
+            # Add coverage info jika ada
+            if 'Cover_Months' in df_batch.columns:
+                display_cols.append('Cover_Months')
+                display_cols.append('Coverage_Status')
             
             # Add price if available
             if 'Floor_Price' in filtered_drill.columns:
@@ -3509,19 +3597,45 @@ with tab3:
             if 'Value' in drill_df.columns:
                 drill_df['Value'] = drill_df['Value'].apply(lambda x: f"Rp {x:,.0f}")
             
+            if 'Cover_Months' in drill_df.columns:
+                drill_df['Cover_Months'] = drill_df['Cover_Months'].apply(lambda x: f"{x:.1f}" if x < 999 else "N/A")
+            
             # Color code by expiry
             def color_expiry(row):
-                if row['Expiry_Category'] == '❌ EXPIRED':
-                    return ['background-color: #FFEBEE'] * len(row)
-                elif row['Expiry_Category'] == '🚨 Critical (<30 days)':
-                    return ['background-color: #FFF3E0'] * len(row)
-                elif row['Expiry_Category'] == '⚠️ Warning (1-3 months)':
-                    return ['background-color: #FFF8E1'] * len(row)
-                return [''] * len(row)
+                colors = []
+                for col in drill_df.columns:
+                    if row['Expiry_Category'] == '❌ EXPIRED':
+                        colors.append('background-color: #FFEBEE; color: #C62828')
+                    elif row['Expiry_Category'] == '🚨 Critical (<30 days)':
+                        colors.append('background-color: #FFF3E0; color: #EF6C00')
+                    elif row['Expiry_Category'] == '⚠️ Warning (1-3 months)':
+                        colors.append('background-color: #FFF8E1; color: #FF8F00')
+                    else:
+                        colors.append('')
+                return colors
+            
+            # Color code by status
+            def color_status(row):
+                colors = []
+                for col in drill_df.columns:
+                    if row['Status'] == 'Active':
+                        colors.append('')
+                    elif row['Status'] == 'Inactive':
+                        colors.append('background-color: #F5F5F5; color: #757575')
+                    else:
+                        colors.append('background-color: #ECEFF1; color: #546E7A')
+                return colors
+            
+            # Apply styling
+            styled_drill_df = drill_df.style
+            if 'Expiry_Category' in drill_df.columns:
+                styled_drill_df = styled_drill_df.apply(color_expiry, axis=1)
+            if 'Status' in drill_df.columns:
+                styled_drill_df = styled_drill_df.apply(color_status, axis=1)
             
             # Display with styling
             st.dataframe(
-                drill_df.style.apply(color_expiry, axis=1),
+                styled_drill_df,
                 use_container_width=True,
                 height=min(400, (len(drill_df) + 1) * 35)
             )
@@ -3561,7 +3675,7 @@ with tab3:
                 critical = df_batch[df_batch['Expiry_Category'].isin(['❌ EXPIRED', '🚨 Critical (<30 days)'])]
                 if not critical.empty:
                     st.warning(f"**{len(critical)} critical items found!**")
-                    st.dataframe(critical[['SKU_ID', 'Product_Name', 'Stock_Qty', 'Expiry_Category', 'Expiry_Date']], 
+                    st.dataframe(critical[['SKU_ID', 'Product_Name', 'Status', 'Stock_Qty', 'Expiry_Category', 'Expiry_Date']], 
                                 use_container_width=True)
         
         with action_col3:
@@ -3592,20 +3706,19 @@ with tab3:
                 if len(high_stock) > 0:
                     insights.append(f"🟡 **Excess Stock:** {len(high_stock)} Regular SKUs have more than 1.5 months coverage")
             
+            # Status distribution insight
+            if 'Status' in df_batch.columns:
+                status_counts = df_batch['Status'].value_counts()
+                inactive_count = status_counts.get('Inactive', 0)
+                if inactive_count > 0:
+                    insights.append(f"📊 **Inactive SKUs:** {inactive_count} SKUs marked as Inactive. Consider discontinuing or clearance.")
+            
             # Category concentration insight
             category_dist = df_batch.groupby('Stock_Category')['Stock_Qty'].sum()
             top_3_categories = category_dist.nlargest(3)
             if len(top_3_categories) >= 3:
                 top_3_percent = (top_3_categories.sum() / total_stock * 100)
-                insights.append(f"📊 **Inventory Concentration:** Top 3 categories hold {top_3_percent:.1f}% of total stock")
-            
-            # Value concentration insight
-            if 'Floor_Price' in df_batch.columns:
-                df_batch['Value'] = df_batch['Stock_Qty'] * df_batch['Floor_Price']
-                value_by_category = df_batch.groupby('Stock_Category')['Value'].sum()
-                top_value_category = value_by_category.idxmax() if not value_by_category.empty else "N/A"
-                top_value = value_by_category.max() if not value_by_category.empty else 0
-                insights.append(f"💰 **Value Focus:** '{top_value_category}' represents Rp {top_value:,.0f} of inventory value")
+                insights.append(f"📦 **Inventory Concentration:** Top 3 categories hold {top_3_percent:.1f}% of total stock")
             
             # Display insights
             for insight in insights:
@@ -3617,7 +3730,9 @@ with tab3:
                 "📦 **Clearance Strategy:** Create promotions for expiring items (>30 days)",
                 "🔄 **Stock Rotation:** Implement FIFO (First-In-First-Out) system",
                 "📊 **Regular Audits:** Schedule monthly expiry checks",
-                "🚨 **Alert System:** Set up expiry notifications at 60, 30, and 7 days"
+                "🚨 **Alert System:** Set up expiry notifications at 60, 30, and 7 days",
+                "🎯 **Replenishment Plan:** Order SKUs with <0.8 months coverage",
+                "📉 **Stock Reduction:** Reduce orders for SKUs with >1.5 months coverage"
             ]
             
             for rec in recommendations:
