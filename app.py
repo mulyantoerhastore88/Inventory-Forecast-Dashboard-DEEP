@@ -3527,7 +3527,7 @@ with tab3:
         # ============================================
         st.markdown("---")
         st.markdown("### 🗓️ Inventory Matrix: Category vs Expiry")
-        st.caption("**Revised Category:** Fresh Batch (>12 months) | NED 6-12 | NED 3-6 | NED Under 3 | EXPIRED")
+        st.caption("**Excel-style Pivot Table** - Horizontal expiry categories with heatmap visualization")
         
         # Create pivot table
         pivot = pd.pivot_table(
@@ -3539,13 +3539,14 @@ with tab3:
             fill_value=0
         )
         
-        # Reorder columns logically - REVISED ORDER
+        # Reorder columns logically
         expiry_order = [
             '❌ EXPIRED',
-            '⚠️ NED Under 3',
-            '📅 NED 3-6', 
-            '📦 NED 6-12',
-            '✅ Fresh Batch (>12 months)',
+            '🚨 Critical (<30 days)',
+            '⚠️ Warning (1-3 months)',
+            '📅 Normal (3-6 months)',
+            '✅ Good (6-12 months)',
+            '🌟 Excellent (>1 year)',
             'Not Defined'
         ]
         
