@@ -3345,9 +3345,7 @@ with tab3:
             # Row 4: Detailed Coverage Table
             st.markdown("---")
                     
-        else:
-            st.warning("⚠️ No Active Regular SKUs found for coverage analysis")
-            
+                  
             # ============================================
             # NEW: WAREHOUSE UTILIZATION INSIGHTS
             # ============================================
