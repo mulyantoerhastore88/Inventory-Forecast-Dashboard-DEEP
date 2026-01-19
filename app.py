@@ -3536,45 +3536,7 @@ with tab3:
                 use_container_width=True,
                 height=min(600, (len(pivot_sorted) + 2) * 35)
             )
-            
-            # Summary statistics bawah pivot
-            st.markdown("#### 📊 Matrix Statistics")
-            
-            col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
-            
-            with col_stat1:
-                total_cells = (len(pivot_sorted) - 1) * (len(pivot_sorted.columns) - 1)  # Exclude totals
-                zero_cells = (pivot_sorted.iloc[:-1, :-1] == 0).sum().sum()
-                fill_rate = ((total_cells - zero_cells) / total_cells * 100) if total_cells > 0 else 0
-                st.metric("Matrix Fill Rate", f"{fill_rate:.1f}%")
-            
-            with col_stat2:
-                # Exclude TOTAL dari pencarian max
-                pivot_without_total = pivot_sorted.drop('TOTAL', errors='ignore')
-                if not pivot_without_total.empty and 'TOTAL' in pivot_without_total.columns:
-                    max_category = pivot_without_total['TOTAL'].idxmax()
-                    max_value = pivot_without_total['TOTAL'].max()
-                    st.metric("Largest Category", f"{max_category}", delta=f"{max_value:,.0f} units")
-                else:
-                    st.metric("Largest Category", "N/A")
-            
-            with col_stat3:
-                if '❌ EXPIRED' in pivot_sorted.columns:
-                    # Ambil total expired (exclude TOTAL row)
-                    expired_total = pivot_sorted['❌ EXPIRED'].iloc[:-1].sum()
-                    st.metric("Expired Stock", f"{expired_total:,.0f}", delta_color="inverse")
-                else:
-                    st.metric("Expired Stock", "0")
-            
-            with col_stat4:
-                if '🚨 Critical (<30 days)' in pivot_sorted.columns:
-                    # Ambil total critical (exclude TOTAL row)
-                    critical_total = pivot_sorted['🚨 Critical (<30 days)'].iloc[:-1].sum()
-                    st.metric("Critical Stock", f"{critical_total:,.0f}", delta_color="inverse")
-                else:
-                    st.metric("Critical Stock", "0")
-            
-        
+                    
         # ============================================
         # SECTION 4: DRILL-DOWN ANALYSIS
         # ============================================
