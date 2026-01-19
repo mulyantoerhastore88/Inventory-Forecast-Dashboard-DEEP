@@ -3197,15 +3197,15 @@ with tab3:
                 value=avg_cover,
                 domain={'x': [0, 1], 'y': [0, 1]},
                 title={
-                    'text': "Avg Coverage<br><span style='font-size:10px;color:gray'>Target: 0.8-1.5 months</span>",
-                    'font': {'size': 14}
+                    'text': "Avg Coverage<br><span style='font-size:12px;color:gray'>Target: 0.8-1.5 months</span>",
+                    'font': {'size': 16}
                 },
                 number={
                     'suffix': " months",
                     'font': {'size': 24}
                 },
                 gauge={
-                    'axis': {'range': [0, 3], 'tickwidth': 1, 'tickfont': {'size': 10}},
+                    'axis': {'range': [0, 3], 'tickwidth': 1, 'tickfont': {'size': 12}},
                     'bar': {'color': "#667eea"},
                     'steps': [
                         {'range': [0, 0.8], 'color': "#FF5252"},
@@ -3214,7 +3214,7 @@ with tab3:
                     ],
                     'threshold': {
                         'line': {'color': "black", 'width': 3},
-                        'thickness': 0.75,
+                        'thickness': 0.80,
                         'value': 1.5
                     }
                 }
