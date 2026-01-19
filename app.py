@@ -3055,11 +3055,19 @@ with tab3:
         st.markdown("### 📅 Inventory Coverage Analysis (Months Cover)")
         st.caption("**Analyzing Regular SKUs Only** | Thresholds: <0.8 months = Need Replenishment | 0.8-1.5 months = Ideal | >1.5 months = Over Stock")
         
-        # Identifikasi Regular vs Non-Regular SKUs
-        # Asumsi: Regular = SKU Active yang memiliki sales history dan forecast
-        # Non-Regular = SKU Inactive atau tidak ada forecast
+        # ======================== TAMBAH DI SINI: WAREHOUSE SETTINGS ========================
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("### 🏢 Warehouse Settings")
+        WH_CAPACITY = st.sidebar.number_input(
+            "Warehouse Capacity (pcs)",
+            min_value=1000,
+            max_value=1000000,
+            value=250000,
+            step=10000,
+            help="Total warehouse capacity in pieces"
+        )
         
-        # Helper function untuk identifikasi SKU Regular
+        # Identifikasi Regular vs Non-Regular SKUs
         def identify_regular_skus(df_stock, df_sales, df_forecast, df_product):
             """Identify Regular SKUs based on sales, forecast, and active status"""
             regular_skus = []
@@ -3150,22 +3158,88 @@ with tab3:
             if 'Product_Name' not in df_coverage.columns:
                 df_coverage = add_product_info_to_data(df_coverage, df_product)
             
+            # ======================== TAMBAH DI SINI: HITUNG METRICS PENTING ========================
+            # Hitung metrics untuk speedometer
+            valid_coverage = df_coverage[df_coverage['Cover_Months'] < 999]
+            avg_cover = valid_coverage['Cover_Months'].mean() if not valid_coverage.empty else 0
+            
+            # Warehouse occupancy calculation
+            current_occupancy = df_regular['Stock_Qty'].sum() if not df_regular.empty else 0
+            occupancy_percentage = (current_occupancy / WH_CAPACITY * 100) if WH_CAPACITY > 0 else 0
+            
+            # SKU health score
+            healthy_skus = len(df_coverage[df_coverage['Coverage_Status'] == 'Ideal/Healthy'])
+            total_regular_skus = len(df_coverage)
+            health_score = (healthy_skus / total_regular_skus * 100) if total_regular_skus > 0 else 0
+            
             # ============================================
-            # COVERAGE ANALYSIS VISUALIZATION - COMPACT VERSION
+            # COVERAGE ANALYSIS VISUALIZATION - COMPACT VERSION (FIXED)
             # ============================================
             
-            # Row 2: Three Speedometers in One Row
+            # Row 1: Coverage Metrics Cards (tetap sama)
+            coverage_col1, coverage_col2, coverage_col3, coverage_col4 = st.columns(4)
+            
+            with coverage_col1:
+                need_replenish = df_coverage[df_coverage['Coverage_Status'] == 'Need Replenishment']
+                need_count = len(need_replenish)
+                need_qty = need_replenish['Stock_Qty'].sum()
+                st.metric(
+                    "🔴 Need Replenishment", 
+                    f"{need_count} SKUs",
+                    f"{need_qty:,.0f} units",
+                    delta_color="inverse"
+                )
+            
+            with coverage_col2:
+                ideal = df_coverage[df_coverage['Coverage_Status'] == 'Ideal/Healthy']
+                ideal_count = len(ideal)
+                ideal_qty = ideal['Stock_Qty'].sum()
+                st.metric(
+                    "🟢 Ideal/Healthy", 
+                    f"{ideal_count} SKUs",
+                    f"{ideal_qty:,.0f} units"
+                )
+            
+            with coverage_col3:
+                high_stock = df_coverage[df_coverage['Coverage_Status'] == 'High Stock']
+                high_count = len(high_stock)
+                high_qty = high_stock['Stock_Qty'].sum()
+                st.metric(
+                    "🟡 High Stock", 
+                    f"{high_count} SKUs",
+                    f"{high_qty:,.0f} units",
+                    delta_color="off"
+                )
+            
+            with coverage_col4:
+                st.metric(
+                    "📊 Avg Coverage", 
+                    f"{avg_cover:.1f} months",
+                    f"{len(valid_coverage)} SKUs"
+                )
+            
+            # Row 2: Three Speedometers in One Row (FIXED VERSION)
+            st.markdown("---")
             st.markdown("#### ⚡ Inventory Health Dashboard")
             
             speed_col1, speed_col2, speed_col3 = st.columns(3)
             
             with speed_col1:
                 # Speedometer 1: Average Coverage
+                coverage_status = ""
+                if avg_cover < 0.8:
+                    coverage_status = "🔴 Need Replenishment"
+                elif avg_cover <= 1.5:
+                    coverage_status = "🟢 Ideal"
+                else:
+                    coverage_status = "🟡 High Stock"
+                
                 fig_coverage = go.Figure(go.Indicator(
                     mode="gauge+number",
                     value=avg_cover,
                     domain={'x': [0, 1], 'y': [0, 1]},
-                    title={'text': "📅 Avg Coverage<br><span style='font-size:0.7em'>Months</span>"},
+                    title={'text': f"📅 Avg Coverage<br><span style='font-size:0.7em;color:gray'>Target: 0.8-1.5 months</span>"},
+                    number={'suffix': " months"},
                     gauge={
                         'axis': {'range': [0, 3], 'tickwidth': 1},
                         'bar': {'color': "#667eea"},
@@ -3187,28 +3261,27 @@ with tab3:
                     margin=dict(t=50, b=30, l=20, r=20)
                 )
                 
-                # Status indicator
-                coverage_status = ""
-                if avg_cover < 0.8:
-                    coverage_status = "🔴 Need Replenishment"
-                elif avg_cover <= 1.5:
-                    coverage_status = "🟢 Ideal"
-                else:
-                    coverage_status = "🟡 High Stock"
-                
                 st.plotly_chart(fig_coverage, use_container_width=True)
-                st.caption(f"**{coverage_status}**")
+                st.caption(f"**{coverage_status}** | Based on {len(valid_coverage)} SKUs")
             
             with speed_col2:
                 # Speedometer 2: Warehouse Occupancy
+                wh_status = ""
+                if occupancy_percentage < 60:
+                    wh_status = "🟢 Optimal"
+                elif occupancy_percentage < 80:
+                    wh_status = "🟡 Moderate"
+                else:
+                    wh_status = "🔴 Critical"
+                
                 fig_wh = go.Figure(go.Indicator(
                     mode="gauge+number",
                     value=occupancy_percentage,
                     domain={'x': [0, 1], 'y': [0, 1]},
                     title={
-                        'text': f"🏢 WH Occupancy<br><span style='font-size:0.7em'>{current_occupancy:,.0f}/{WH_CAPACITY:,.0f} pcs</span>",
-                        'font': {'size': 14}
+                        'text': f"🏢 WH Occupancy<br><span style='font-size:0.7em;color:gray'>{current_occupancy:,.0f}/{WH_CAPACITY:,.0f} pcs</span>"
                     },
+                    number={'suffix': "%"},
                     gauge={
                         'axis': {'range': [0, 100], 'tickwidth': 1},
                         'bar': {'color': "#9C27B0"},
@@ -3230,33 +3303,25 @@ with tab3:
                     margin=dict(t=50, b=30, l=20, r=20)
                 )
                 
-                # Occupancy status
-                wh_status = ""
-                if occupancy_percentage < 60:
-                    wh_status = "🟢 Optimal"
-                elif occupancy_percentage < 80:
-                    wh_status = "🟡 Moderate"
-                else:
-                    wh_status = "🔴 Critical"
-                
                 st.plotly_chart(fig_wh, use_container_width=True)
                 st.caption(f"**{wh_status}** | Available: {WH_CAPACITY - current_occupancy:,.0f} pcs")
             
             with speed_col3:
                 # Speedometer 3: SKU Health Score
-                # Hitung health score berdasarkan coverage status
-                if not df_coverage.empty:
-                    healthy_skus = len(df_coverage[df_coverage['Coverage_Status'] == 'Ideal/Healthy'])
-                    total_regular_skus = len(df_coverage)
-                    health_score = (healthy_skus / total_regular_skus * 100) if total_regular_skus > 0 else 0
+                health_status = ""
+                if health_score >= 80:
+                    health_status = "🟢 Excellent"
+                elif health_score >= 50:
+                    health_status = "🟡 Moderate"
                 else:
-                    health_score = 0
+                    health_status = "🔴 Poor"
                 
                 fig_health = go.Figure(go.Indicator(
                     mode="gauge+number",
                     value=health_score,
                     domain={'x': [0, 1], 'y': [0, 1]},
-                    title={'text': "❤️ SKU Health<br><span style='font-size:0.7em'>% Ideal Coverage</span>"},
+                    title={'text': f"❤️ SKU Health<br><span style='font-size:0.7em;color:gray'>% Ideal Coverage</span>"},
+                    number={'suffix': "%"},
                     gauge={
                         'axis': {'range': [0, 100], 'tickwidth': 1},
                         'bar': {'color': "#00BCD4"},
@@ -3278,21 +3343,82 @@ with tab3:
                     margin=dict(t=50, b=30, l=20, r=20)
                 )
                 
-                # Health status
-                health_status = ""
-                if health_score >= 80:
-                    health_status = "🟢 Excellent"
-                elif health_score >= 50:
-                    health_status = "🟡 Moderate"
-                else:
-                    health_status = "🔴 Poor"
-                
                 st.plotly_chart(fig_health, use_container_width=True)
                 st.caption(f"**{health_status}** | {healthy_skus}/{total_regular_skus} SKUs ideal")
             
-            # Row 3: Detailed Coverage Table (tetap seperti sebelumnya)
+            # Row 3: Warehouse Utilization Insights
+            st.markdown("---")
+            with st.expander("📦 **Warehouse Space Analysis**", expanded=False):
+                
+                # Utilization by category
+                category_utilization = df_regular.groupby('Stock_Category').agg({
+                    'Stock_Qty': 'sum',
+                    'SKU_ID': 'count'
+                }).reset_index()
+                
+                category_utilization['Utilization_Pct'] = (category_utilization['Stock_Qty'] / current_occupancy * 100)
+                category_utilization = category_utilization.sort_values('Stock_Qty', ascending=False)
+                
+                col_util1, col_util2 = st.columns(2)
+                
+                with col_util1:
+                    # Top categories bar chart
+                    fig_top_cat = px.bar(
+                        category_utilization.head(10),
+                        x='Stock_Category',
+                        y='Stock_Qty',
+                        title="Top 10 Categories by Space Usage",
+                        labels={'Stock_Qty': 'Quantity (pcs)', 'Stock_Category': 'Category'},
+                        color='Stock_Qty',
+                        color_continuous_scale='Viridis'
+                    )
+                    
+                    fig_top_cat.update_layout(height=300)
+                    st.plotly_chart(fig_top_cat, use_container_width=True)
+                
+                with col_util2:
+                    # Space allocation pie chart
+                    fig_pie_space = px.pie(
+                        category_utilization,
+                        values='Stock_Qty',
+                        names='Stock_Category',
+                        title="Warehouse Space Allocation",
+                        hole=0.4
+                    )
+                    
+                    fig_pie_space.update_layout(height=300)
+                    st.plotly_chart(fig_pie_space, use_container_width=True)
+                
+                # Space optimization tips
+                st.markdown("#### 💡 Space Optimization Tips")
+                
+                tips = []
+                
+                if occupancy_percentage > 80:
+                    tips.append("🚨 **Urgent Action Required:** Warehouse >80% full. Consider clearance sales for slow-moving items.")
+                elif occupancy_percentage > 60:
+                    tips.append("⚠️ **Monitor Closely:** Warehouse 60-80% full. Optimize storage layout.")
+                
+                if not category_utilization.empty:
+                    top_cat = category_utilization.iloc[0]
+                    if top_cat['Utilization_Pct'] > 30:
+                        tips.append(f"📦 **Category Focus:** '{top_cat['Stock_Category']}' uses {top_cat['Utilization_Pct']:.1f}% of space. Consider storage optimization.")
+                
+                high_stock_count = len(df_coverage[df_coverage['Coverage_Status'] == 'High Stock'])
+                if high_stock_count > 0:
+                    tips.append(f"📉 **Stock Reduction:** {high_stock_count} SKUs have >1.5 months coverage. Reduce to free up space.")
+                
+                for tip in tips:
+                    st.info(tip)
+            
+            # Row 4: Detailed Coverage Table
+            st.markdown("---")
             st.markdown("#### 📋 Detailed Coverage Analysis")
-            # ... [rest of your coverage table code]
+            
+            # ... [rest of your coverage table code remains the same]
+        
+        else:
+            st.warning("⚠️ No Active Regular SKUs found for coverage analysis")
             
             # ============================================
             # NEW: WAREHOUSE UTILIZATION INSIGHTS
