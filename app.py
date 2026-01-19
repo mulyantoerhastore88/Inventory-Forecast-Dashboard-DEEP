@@ -3413,10 +3413,7 @@ with tab3:
             
             # Row 4: Detailed Coverage Table
             st.markdown("---")
-            st.markdown("#### 📋 Detailed Coverage Analysis")
-            
-            # ... [rest of your coverage table code remains the same]
-        
+                    
         else:
             st.warning("⚠️ No Active Regular SKUs found for coverage analysis")
             
