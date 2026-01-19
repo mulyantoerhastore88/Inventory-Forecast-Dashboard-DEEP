@@ -3265,59 +3265,59 @@ with tab3:
                 st.caption(f"**{coverage_status}** | Based on {len(valid_coverage)} SKUs")
             
             with speed_col2:
-            # Speedometer 2: Warehouse Occupancy - COMPACT VERSION
-            wh_status = ""
-            if occupancy_percentage < 60:
-                wh_status = "🟢 Optimal"
-            elif occupancy_percentage < 80:
-                wh_status = "🟡 Moderate"
-            else:
-                wh_status = "🔴 Critical"
-            
-            fig_wh = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=occupancy_percentage,
-                domain={'x': [0, 1], 'y': [0, 1]},
-                title={
-                    'text': "WH Occupancy",  # Hanya judul utama
-                    'font': {'size': 16}
-                },
-                number={
-                    'suffix': "%",
-                    'font': {'size': 28}
-                },
-                gauge={
-                    'axis': {'range': [0, 100], 'tickwidth': 1, 'tickfont': {'size': 9}},
-                    'bar': {'color': "#9C27B0"},
-                    'steps': [
-                        {'range': [0, 60], 'color': '#4CAF50'},
-                        {'range': [60, 80], 'color': '#FF9800'},
-                        {'range': [80, 100], 'color': '#F44336'}
-                    ],
-                    'threshold': {
-                        'line': {'color': "red", 'width': 4},
-                        'thickness': 0.75,
-                        'value': 80
+                # Speedometer 2: Warehouse Occupancy - COMPACT VERSION
+                wh_status = ""
+                if occupancy_percentage < 60:
+                    wh_status = "🟢 Optimal"
+                elif occupancy_percentage < 80:
+                    wh_status = "🟡 Moderate"
+                else:
+                    wh_status = "🔴 Critical"
+                
+                fig_wh = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=occupancy_percentage,
+                    domain={'x': [0, 1], 'y': [0, 1]},
+                    title={
+                        'text': "WH Occupancy",  # Hanya judul utama
+                        'font': {'size': 16}
+                    },
+                    number={
+                        'suffix': "%",
+                        'font': {'size': 28}
+                    },
+                    gauge={
+                        'axis': {'range': [0, 100], 'tickwidth': 1, 'tickfont': {'size': 9}},
+                        'bar': {'color': "#9C27B0"},
+                        'steps': [
+                            {'range': [0, 60], 'color': '#4CAF50'},
+                            {'range': [60, 80], 'color': '#FF9800'},
+                            {'range': [80, 100], 'color': '#F44336'}
+                        ],
+                        'threshold': {
+                            'line': {'color': "red", 'width': 4},
+                            'thickness': 0.75,
+                            'value': 80
+                        }
                     }
-                }
-            ))
-            
-            # Tambah annotation untuk capacity info (bukan di title)
-            fig_wh.add_annotation(
-                x=0.5, y=-0.12,
-                text=f"{current_occupancy:,.0f}/{WH_CAPACITY:,.0f} pcs",
-                showarrow=False,
-                font=dict(size=10, color="gray")
-            )
-            
-            fig_wh.update_layout(
-                height=250,
-                margin=dict(t=50, b=40, l=20, r=20),  # Adjust margin untuk annotation
-                font={'size': 12}
-            )
-            
-            st.plotly_chart(fig_wh, use_container_width=True)
-            st.caption(f"**{wh_status}** | Available: {WH_CAPACITY - current_occupancy:,.0f} pcs")
+                ))
+                
+                # Tambah annotation untuk capacity info (bukan di title)
+                fig_wh.add_annotation(
+                    x=0.5, y=-0.12,
+                    text=f"{current_occupancy:,.0f}/{WH_CAPACITY:,.0f} pcs",
+                    showarrow=False,
+                    font=dict(size=10, color="gray")
+                )
+                
+                fig_wh.update_layout(
+                    height=250,
+                    margin=dict(t=50, b=40, l=20, r=20),  # Adjust margin untuk annotation
+                    font={'size': 12}
+                )
+                
+                st.plotly_chart(fig_wh, use_container_width=True)
+                st.caption(f"**{wh_status}** | Available: {WH_CAPACITY - current_occupancy:,.0f} pcs")
             
             with speed_col3:
                 # Speedometer 3: SKU Health Score
