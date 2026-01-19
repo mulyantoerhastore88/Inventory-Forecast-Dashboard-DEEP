@@ -3244,8 +3244,8 @@ with tab3:
                 value=occupancy_percentage,
                 domain={'x': [0, 1], 'y': [0, 1]},
                 title={
-                    'text': "WH Occupancy<br><span style='font-size:10px;color:gray'>250K capacity</span>",
-                    'font': {'size': 14}
+                    'text': "WH Occupancy<br><span style='font-size:12px;color:gray'>250K capacity</span>",
+                    'font': {'size': 16}
                 },
                 number={
                     'suffix': "%",
@@ -3261,7 +3261,7 @@ with tab3:
                     ],
                     'threshold': {
                         'line': {'color': "red", 'width': 4},
-                        'thickness': 0.75,
+                        'thickness': 0.80,
                         'value': 80
                     }
                 }
