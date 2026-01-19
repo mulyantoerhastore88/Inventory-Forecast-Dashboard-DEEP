@@ -3245,7 +3245,7 @@ with tab3:
                 domain={'x': [0, 1], 'y': [0, 1]},
                 title={
                     'text': "WH Occupancy<br><span style='font-size:12px;color:gray'>250K capacity</span>",
-                    'font': {'size': 16}
+                    'font': {'size': 11}
                 },
                 number={
                     'suffix': "%",
