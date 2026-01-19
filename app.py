@@ -3586,9 +3586,9 @@ with tab3:
             # Display detailed table
             st.markdown(f"**📋 Detailed SKU List ({len(filtered_drill)} items)**")
             
-            # Prepare display columns
-            display_cols = ['SKU_ID', 'Product_Name', 'Status', 'SKU_Type', 'Stock_Category', 
-                          'Expiry_Category', 'Stock_Qty', 'Expiry_Date']
+            # Prepare display columns - TANPA SKU_Type
+            display_cols = ['SKU_ID', 'Product_Name', 'Status', 'Stock_Category', 
+                            'Expiry_Category', 'Stock_Qty', 'Expiry_Date']
             
             # Add coverage info jika ada
             if 'Cover_Months' in df_batch.columns:
