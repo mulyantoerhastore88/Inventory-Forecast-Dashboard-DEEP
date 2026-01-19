@@ -2959,13 +2959,13 @@ with tab3:
                 elif days <= 30:
                     return '🚨 Critical (<30 days)'
                 elif days <= 90:
-                    return '⚠️ Warning (1-3 months)'
+                    return '⚠️ NED (1-3 months)'
                 elif days <= 180:
-                    return '📅 Normal (3-6 months)'
+                    return '📅 NED (3-6 months)'
                 elif days <= 365:
-                    return '✅ Good (6-12 months)'
+                    return '✅ NED (6-12 months)'
                 else:
-                    return '🌟 Excellent (>1 year)'
+                    return '🌟 Fresh (> 12 months)'
             except:
                 return 'Not Defined'
         
@@ -3543,10 +3543,10 @@ with tab3:
         expiry_order = [
             '❌ EXPIRED',
             '🚨 Critical (<30 days)',
-            '⚠️ Warning (1-3 months)',
-            '📅 Normal (3-6 months)',
-            '✅ Good (6-12 months)',
-            '🌟 Excellent (>1 year)',
+            '⚠️ NED (1-3 months)',
+            '📅 NED (3-6 months)',
+            '✅ NED (6-12 months)',
+            '🌟 Fresh (> 12 months)',
             'Not Defined'
         ]
         
@@ -3819,7 +3819,7 @@ with tab3:
                         colors.append('background-color: #FFEBEE; color: #C62828')
                     elif row['Expiry_Category'] == '🚨 Critical (<30 days)':
                         colors.append('background-color: #FFF3E0; color: #EF6C00')
-                    elif row['Expiry_Category'] == '⚠️ Warning (1-3 months)':
+                    elif row['Expiry_Category'] == '⚠️ NED (1-3 months)':
                         colors.append('background-color: #FFF8E1; color: #FF8F00')
                     else:
                         colors.append('')
