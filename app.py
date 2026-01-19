@@ -3154,52 +3154,15 @@ with tab3:
             # COVERAGE ANALYSIS VISUALIZATION
             # ============================================
             
-            # Row 1: Coverage Metrics Cards
-            coverage_col1, coverage_col2, coverage_col3, coverage_col4 = st.columns(4)
+            # Row 2: Coverage Distribution Chart + Warehouse Occupancy
+            st.markdown("#### 📊 Coverage Status & Warehouse Occupancy")
             
-            with coverage_col1:
-                need_replenish = df_coverage[df_coverage['Coverage_Status'] == 'Need Replenishment']
-                need_count = len(need_replenish)
-                need_qty = need_replenish['Stock_Qty'].sum()
-                st.metric(
-                    "🔴 Need Replenishment", 
-                    f"{need_count} SKUs",
-                    f"{need_qty:,.0f} units",
-                    delta_color="inverse"
-                )
+            # Data untuk warehouse occupancy
+            WH_CAPACITY = 250000  # pcs
+            current_occupancy = df_regular['Stock_Qty'].sum() if not df_regular.empty else 0
+            occupancy_percentage = (current_occupancy / WH_CAPACITY * 100) if WH_CAPACITY > 0 else 0
             
-            with coverage_col2:
-                ideal = df_coverage[df_coverage['Coverage_Status'] == 'Ideal/Healthy']
-                ideal_count = len(ideal)
-                ideal_qty = ideal['Stock_Qty'].sum()
-                st.metric(
-                    "🟢 Ideal/Healthy", 
-                    f"{ideal_count} SKUs",
-                    f"{ideal_qty:,.0f} units"
-                )
-            
-            with coverage_col3:
-                high_stock = df_coverage[df_coverage['Coverage_Status'] == 'High Stock']
-                high_count = len(high_stock)
-                high_qty = high_stock['Stock_Qty'].sum()
-                st.metric(
-                    "🟡 High Stock", 
-                    f"{high_count} SKUs",
-                    f"{high_qty:,.0f} units",
-                    delta_color="off"
-                )
-            
-            with coverage_col4:
-                valid_coverage = df_coverage[df_coverage['Cover_Months'] < 999]
-                avg_cover = valid_coverage['Cover_Months'].mean() if not valid_coverage.empty else 0
-                st.metric(
-                    "📊 Avg Coverage", 
-                    f"{avg_cover:.1f} months",
-                    f"{len(valid_coverage)} SKUs"
-                )
-            
-            # Row 2: Coverage Distribution Chart
-            coverage_chart_col1, coverage_chart_col2 = st.columns([2, 1])
+            coverage_chart_col1, coverage_chart_col2, coverage_chart_col3 = st.columns([2, 1, 1])
             
             with coverage_chart_col1:
                 # Donut chart coverage distribution
@@ -3250,110 +3213,162 @@ with tab3:
                 fig_gauge.update_layout(height=300)
                 st.plotly_chart(fig_gauge, use_container_width=True)
             
-            # Row 3: Detailed Coverage Table
-            st.markdown("#### 📋 Detailed Coverage Analysis")
-            
-            # Filter options
-            coverage_filter_col1, coverage_filter_col2 = st.columns(2)
-            
-            with coverage_filter_col1:
-                selected_status = st.selectbox(
-                    "Filter by Coverage Status",
-                    options=['All'] + sorted(df_coverage['Coverage_Status'].unique().tolist()),
-                    index=0,
-                    key="coverage_status_filter"
+            with coverage_chart_col3:
+                # SPEEDOMETER: Warehouse Occupancy
+                fig_wh = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=occupancy_percentage,
+                    domain={'x': [0, 1], 'y': [0, 1]},
+                    title={
+                        'text': f"WH Occupancy<br><span style='font-size:0.8em;color:gray'>{current_occupancy:,.0f} / {WH_CAPACITY:,.0f} pcs</span>",
+                        'font': {'size': 14}
+                    },
+                    gauge={
+                        'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
+                        'bar': {'color': "#9C27B0"},
+                        'bgcolor': "white",
+                        'borderwidth': 2,
+                        'bordercolor': "gray",
+                        'steps': [
+                            {'range': [0, 60], 'color': '#4CAF50'},
+                            {'range': [60, 80], 'color': '#FF9800'},
+                            {'range': [80, 100], 'color': '#F44336'}
+                        ],
+                        'threshold': {
+                            'line': {'color': "red", 'width': 4},
+                            'thickness': 0.75,
+                            'value': 80
+                        }
+                    }
+                ))
+                
+                # Tambah annotation untuk capacity info
+                fig_wh.add_annotation(
+                    x=0.5, y=-0.15,
+                    text=f"Capacity: {WH_CAPACITY:,} pcs",
+                    showarrow=False,
+                    font=dict(size=10, color="gray")
                 )
-            
-            with coverage_filter_col2:
-                min_cover = st.slider(
-                    "Minimum Coverage (Months)",
-                    min_value=0.0,
-                    max_value=5.0,
-                    value=0.0,
-                    step=0.1,
-                    key="coverage_slider"
+                
+                fig_wh.update_layout(
+                    height=300,
+                    margin=dict(t=50, b=50, l=20, r=20)
                 )
+                
+                st.plotly_chart(fig_wh, use_container_width=True)
+                
+                # Tampilkan status occupancy
+                occupancy_status = ""
+                if occupancy_percentage < 60:
+                    occupancy_status = "🟢 Optimal"
+                elif occupancy_percentage < 80:
+                    occupancy_status = "🟡 Moderate"
+                else:
+                    occupancy_status = "🔴 Critical"
+                
+                st.caption(f"**Status:** {occupancy_status} | **Available:** {WH_CAPACITY - current_occupancy:,.0f} pcs")
             
-            # Apply filters
-            df_coverage_filtered = df_coverage.copy()
-            
-            if selected_status != 'All':
-                df_coverage_filtered = df_coverage_filtered[df_coverage_filtered['Coverage_Status'] == selected_status]
-            
-            df_coverage_filtered = df_coverage_filtered[df_coverage_filtered['Cover_Months'] >= min_cover]
-            
-            # Sort options
-            sort_by = st.selectbox(
-                "Sort By",
-                options=['Cover_Months (Desc)', 'Cover_Months (Asc)', 'Stock_Qty (Desc)', 'Avg_Monthly_Sales_3M (Desc)'],
-                index=0,
-                key="coverage_sort"
-            )
-            
-            if sort_by == 'Cover_Months (Desc)':
-                df_coverage_filtered = df_coverage_filtered.sort_values('Cover_Months', ascending=False)
-            elif sort_by == 'Cover_Months (Asc)':
-                df_coverage_filtered = df_coverage_filtered.sort_values('Cover_Months', ascending=True)
-            elif sort_by == 'Stock_Qty (Desc)':
-                df_coverage_filtered = df_coverage_filtered.sort_values('Stock_Qty', ascending=False)
-            else:
-                df_coverage_filtered = df_coverage_filtered.sort_values('Avg_Monthly_Sales_3M', ascending=False)
-            
-            # Display table
-            display_cols = ['SKU_ID', 'Product_Name', 'Brand', 'Status', 'Stock_Category', 
-                          'Stock_Qty', 'Avg_Monthly_Sales_3M', 'Cover_Months', 'Coverage_Status']
-            
-            available_cols = [col for col in display_cols if col in df_coverage_filtered.columns]
-            
-            # Format dataframe
-            df_display = df_coverage_filtered[available_cols].copy()
-            
-            # Add color coding
-            def color_coverage(row):
-                if row['Coverage_Status'] == 'Need Replenishment':
-                    return ['background-color: #FFEBEE; color: #C62828'] * len(row)
-                elif row['Coverage_Status'] == 'Ideal/Healthy':
-                    return ['background-color: #E8F5E9; color: #2E7D32'] * len(row)
-                elif row['Coverage_Status'] == 'High Stock':
-                    return ['background-color: #FFF3E0; color: #EF6C00'] * len(row)
-                return [''] * len(row)
-            
-            # Format numbers
-            if 'Stock_Qty' in df_display.columns:
-                df_display['Stock_Qty'] = df_display['Stock_Qty'].apply(lambda x: f"{x:,.0f}")
-            
-            if 'Avg_Monthly_Sales_3M' in df_display.columns:
-                df_display['Avg_Monthly_Sales_3M'] = df_display['Avg_Monthly_Sales_3M'].apply(lambda x: f"{x:,.0f}")
-            
-            if 'Cover_Months' in df_display.columns:
-                df_display['Cover_Months'] = df_display['Cover_Months'].apply(lambda x: f"{x:.1f}" if x < 999 else "N/A")
-            
-            st.dataframe(
-                df_display.style.apply(color_coverage, axis=1),
-                use_container_width=True,
-                height=400
-            )
-            
-            # Summary statistics
-            st.markdown(f"**📊 Coverage Summary:** {len(df_coverage_filtered)} SKUs | Avg Coverage: {avg_cover:.1f} months")
-            
-            # Export option
-            csv_coverage = df_coverage_filtered.to_csv(index=False)
-            st.download_button(
-                label="📥 Export Coverage Analysis",
-                data=csv_coverage,
-                file_name=f"inventory_coverage_analysis_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv",
-                use_container_width=True,
-                key="export_coverage"
-            )
-        else:
-            st.warning("⚠️ No Active Regular SKUs found for coverage analysis")
-            
-            # Show SKU type distribution
-            if 'SKU_Type' in df_batch.columns:
-                sku_type_counts = df_batch['SKU_Type'].value_counts()
-                st.info(f"**SKU Distribution:** {sku_type_counts.get('Regular', 0)} Regular, {sku_type_counts.get('Non-Regular', 0)} Non-Regular")
+            # ============================================
+            # NEW: WAREHOUSE UTILIZATION INSIGHTS
+            # ============================================
+            st.markdown("---")
+            with st.expander("🏢 **Warehouse Utilization Analysis**", expanded=False):
+                
+                # Hitung utilization per kategori
+                if not df_regular.empty:
+                    # Utilization by category
+                    category_utilization = df_regular.groupby('Stock_Category').agg({
+                        'Stock_Qty': 'sum',
+                        'SKU_ID': 'count'
+                    }).reset_index()
+                    
+                    category_utilization['Utilization_Pct'] = (category_utilization['Stock_Qty'] / current_occupancy * 100)
+                    category_utilization = category_utilization.sort_values('Stock_Qty', ascending=False)
+                    
+                    col_wh1, col_wh2 = st.columns(2)
+                    
+                    with col_wh1:
+                        st.markdown("#### 📦 Top Categories by Space")
+                        
+                        # Bar chart top categories
+                        fig_cat = px.bar(
+                            category_utilization.head(10),
+                            x='Stock_Category',
+                            y='Stock_Qty',
+                            title=f"Top 10 Categories ({category_utilization['Stock_Qty'].head(10).sum():,.0f} pcs)",
+                            labels={'Stock_Qty': 'Quantity (pcs)', 'Stock_Category': 'Category'},
+                            color='Stock_Qty',
+                            color_continuous_scale='Viridis'
+                        )
+                        
+                        fig_cat.update_layout(height=300)
+                        st.plotly_chart(fig_cat, use_container_width=True)
+                    
+                    with col_wh2:
+                        st.markdown("#### 📊 Space Distribution")
+                        
+                        # Pie chart space distribution
+                        fig_pie_wh = px.pie(
+                            category_utilization,
+                            values='Stock_Qty',
+                            names='Stock_Category',
+                            title=f"Warehouse Space Allocation",
+                            hole=0.4,
+                            color_discrete_sequence=px.colors.qualitative.Set3
+                        )
+                        
+                        fig_pie_wh.update_layout(height=300)
+                        st.plotly_chart(fig_pie_wh, use_container_width=True)
+                    
+                    # Warehouse recommendations
+                    st.markdown("#### 💡 Warehouse Optimization Suggestions")
+                    
+                    recommendations = []
+                    
+                    # Space optimization
+                    if occupancy_percentage > 80:
+                        recommendations.append("🚨 **Critical Space:** Warehouse occupancy >80%. Consider urgent stock reduction.")
+                    elif occupancy_percentage > 60:
+                        recommendations.append("⚠️ **Moderate Space:** Warehouse occupancy 60-80%. Monitor closely.")
+                    else:
+                        recommendations.append("✅ **Optimal Space:** Warehouse occupancy <60%. Good utilization.")
+                    
+                    # Category-specific recommendations
+                    if not category_utilization.empty:
+                        top_category = category_utilization.iloc[0]
+                        top_pct = top_category['Utilization_Pct']
+                        if top_pct > 30:
+                            recommendations.append(f"📦 **Category Concentration:** '{top_category['Stock_Category']}' uses {top_pct:.1f}% of total space. Consider diversification.")
+                    
+                    # Coverage-based recommendations
+                    if 'df_coverage' in locals():
+                        high_stock_count = len(df_coverage[df_coverage['Coverage_Status'] == 'High Stock'])
+                        if high_stock_count > 0:
+                            recommendations.append(f"📉 **Excess Stock:** {high_stock_count} SKUs with >1.5 months coverage. Reduce to free up space.")
+                    
+                    for rec in recommendations:
+                        st.info(rec)
+                
+                # Space projection
+                st.markdown("#### 📈 Space Projection")
+                
+                col_proj1, col_proj2, col_proj3 = st.columns(3)
+                
+                with col_proj1:
+                    available_space = WH_CAPACITY - current_occupancy
+                    st.metric("Available Space", f"{available_space:,.0f} pcs")
+                
+                with col_proj2:
+                    # Project jika semua Need Replenishment diorder
+                    if 'need_replenish' in locals() and not need_replenish.empty:
+                        projected_qty = need_replenish['Avg_Monthly_Sales_3M'].sum() * 1.5  # Order untuk 1.5 bulan
+                        st.metric("Replenishment Projection", f"{projected_qty:,.0f} pcs")
+                
+                with col_proj3:
+                    projected_occupancy = current_occupancy + (need_replenish['Avg_Monthly_Sales_3M'].sum() * 1.5 if 'need_replenish' in locals() and not need_replenish.empty else 0)
+                    projected_pct = (projected_occupancy / WH_CAPACITY * 100) if WH_CAPACITY > 0 else 0
+                    st.metric("Projected Occupancy", f"{projected_pct:.1f}%")
+                    
         
         # ============================================
         # SECTION 2: INVENTORY MATRIX (PIVOT TABLE - FIXED VERSION)
