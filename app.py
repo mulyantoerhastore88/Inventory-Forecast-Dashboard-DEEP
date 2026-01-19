@@ -3172,192 +3172,110 @@ with tab3:
             total_regular_skus = len(df_coverage)
             health_score = (healthy_skus / total_regular_skus * 100) if total_regular_skus > 0 else 0
             
-            # ============================================
-            # COVERAGE ANALYSIS VISUALIZATION - COMPACT VERSION (FIXED)
-            # ============================================
+        # ============================================
+        # COVERAGE ANALYSIS VISUALIZATION - COMPACT VERSION (2 SPEEDOMETERS)
+        # ============================================
+        
+        # Row 2: Two Speedometers in One Row
+        st.markdown("---")
+        st.markdown("#### ⚡ Inventory Health Dashboard")
+        
+        speed_col1, speed_col2 = st.columns(2)  # UBAH: dari 3 jadi 2 kolom
+        
+        with speed_col1:
+            # Speedometer 1: Average Coverage
+            coverage_status = ""
+            if avg_cover < 0.8:
+                coverage_status = "🔴 Need Replenishment"
+            elif avg_cover <= 1.5:
+                coverage_status = "🟢 Ideal"
+            else:
+                coverage_status = "🟡 High Stock"
             
-            # Row 1: Coverage Metrics Cards (tetap sama)
-            coverage_col1, coverage_col2, coverage_col3, coverage_col4 = st.columns(4)
-            
-            with coverage_col1:
-                need_replenish = df_coverage[df_coverage['Coverage_Status'] == 'Need Replenishment']
-                need_count = len(need_replenish)
-                need_qty = need_replenish['Stock_Qty'].sum()
-                st.metric(
-                    "🔴 Need Replenishment", 
-                    f"{need_count} SKUs",
-                    f"{need_qty:,.0f} units",
-                    delta_color="inverse"
-                )
-            
-            with coverage_col2:
-                ideal = df_coverage[df_coverage['Coverage_Status'] == 'Ideal/Healthy']
-                ideal_count = len(ideal)
-                ideal_qty = ideal['Stock_Qty'].sum()
-                st.metric(
-                    "🟢 Ideal/Healthy", 
-                    f"{ideal_count} SKUs",
-                    f"{ideal_qty:,.0f} units"
-                )
-            
-            with coverage_col3:
-                high_stock = df_coverage[df_coverage['Coverage_Status'] == 'High Stock']
-                high_count = len(high_stock)
-                high_qty = high_stock['Stock_Qty'].sum()
-                st.metric(
-                    "🟡 High Stock", 
-                    f"{high_count} SKUs",
-                    f"{high_qty:,.0f} units",
-                    delta_color="off"
-                )
-            
-            with coverage_col4:
-                st.metric(
-                    "📊 Avg Coverage", 
-                    f"{avg_cover:.1f} months",
-                    f"{len(valid_coverage)} SKUs"
-                )
-            
-            # Row 2: Three Speedometers in One Row (FIXED VERSION)
-            st.markdown("---")
-            st.markdown("#### ⚡ Inventory Health Dashboard")
-            
-            speed_col1, speed_col2, speed_col3 = st.columns(3)
-            
-            with speed_col1:
-                # Speedometer 1: Average Coverage
-                coverage_status = ""
-                if avg_cover < 0.8:
-                    coverage_status = "🔴 Need Replenishment"
-                elif avg_cover <= 1.5:
-                    coverage_status = "🟢 Ideal"
-                else:
-                    coverage_status = "🟡 High Stock"
-                
-                fig_coverage = go.Figure(go.Indicator(
-                    mode="gauge+number",
-                    value=avg_cover,
-                    domain={'x': [0, 1], 'y': [0, 1]},
-                    title={'text': f"📅 Avg Coverage<br><span style='font-size:0.7em;color:gray'>Target: 0.8-1.5 months</span>"},
-                    number={'suffix': " months"},
-                    gauge={
-                        'axis': {'range': [0, 3], 'tickwidth': 1},
-                        'bar': {'color': "#667eea"},
-                        'steps': [
-                            {'range': [0, 0.8], 'color': "#FF5252"},
-                            {'range': [0.8, 1.5], 'color': "#4CAF50"},
-                            {'range': [1.5, 3], 'color': "#FF9800"}
-                        ],
-                        'threshold': {
-                            'line': {'color': "black", 'width': 3},
-                            'thickness': 0.75,
-                            'value': 1.5
-                        }
+            fig_coverage = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=avg_cover,
+                domain={'x': [0, 1], 'y': [0, 1]},
+                title={
+                    'text': "Avg Coverage<br><span style='font-size:10px;color:gray'>Target: 0.8-1.5 months</span>",
+                    'font': {'size': 14}
+                },
+                number={
+                    'suffix': " months",
+                    'font': {'size': 24}
+                },
+                gauge={
+                    'axis': {'range': [0, 3], 'tickwidth': 1, 'tickfont': {'size': 10}},
+                    'bar': {'color': "#667eea"},
+                    'steps': [
+                        {'range': [0, 0.8], 'color': "#FF5252"},
+                        {'range': [0.8, 1.5], 'color': "#4CAF50"},
+                        {'range': [1.5, 3], 'color': "#FF9800"}
+                    ],
+                    'threshold': {
+                        'line': {'color': "black", 'width': 3},
+                        'thickness': 0.75,
+                        'value': 1.5
                     }
-                ))
-                
-                fig_coverage.update_layout(
-                    height=250,
-                    margin=dict(t=50, b=30, l=20, r=20)
-                )
-                
-                st.plotly_chart(fig_coverage, use_container_width=True)
-                st.caption(f"**{coverage_status}** | Based on {len(valid_coverage)} SKUs")
+                }
+            ))
             
-            with speed_col2:
-                # Speedometer 2: Warehouse Occupancy - COMPACT VERSION
-                wh_status = ""
-                if occupancy_percentage < 60:
-                    wh_status = "🟢 Optimal"
-                elif occupancy_percentage < 80:
-                    wh_status = "🟡 Moderate"
-                else:
-                    wh_status = "🔴 Critical"
-                
-                fig_wh = go.Figure(go.Indicator(
-                    mode="gauge+number",
-                    value=occupancy_percentage,
-                    domain={'x': [0, 1], 'y': [0, 1]},
-                    title={
-                        'text': "WH Occupancy",  # Hanya judul utama
-                        'font': {'size': 18}
-                    },
-                    number={
-                        'suffix': "%",
-                        'font': {'size': 32}
-                    },
-                    gauge={
-                        'axis': {'range': [0, 100], 'tickwidth': 1, 'tickfont': {'size': 11}},
-                        'bar': {'color': "#9C27B0"},
-                        'steps': [
-                            {'range': [0, 60], 'color': '#4CAF50'},
-                            {'range': [60, 80], 'color': '#FF9800'},
-                            {'range': [80, 100], 'color': '#F44336'}
-                        ],
-                        'threshold': {
-                            'line': {'color': "red", 'width': 4},
-                            'thickness': 0.75,
-                            'value': 80
-                        }
-                    }
-                ))
-                
-                # Tambah annotation untuk capacity info (bukan di title)
-                fig_wh.add_annotation(
-                    x=0.5, y=-0.12,
-                    text=f"{current_occupancy:,.0f}/{WH_CAPACITY:,.0f} pcs",
-                    showarrow=False,
-                    font=dict(size=10, color="gray")
-                )
-                
-                fig_wh.update_layout(
-                    height=250,
-                    margin=dict(t=50, b=40, l=20, r=20),  # Adjust margin untuk annotation
-                    font={'size': 12}
-                )
-                
-                st.plotly_chart(fig_wh, use_container_width=True)
-                st.caption(f"**{wh_status}** | Available: {WH_CAPACITY - current_occupancy:,.0f} pcs")
+            fig_coverage.update_layout(
+                height=250,
+                margin=dict(t=40, b=30, l=20, r=20),
+                font={'size': 12}
+            )
             
-            with speed_col3:
-                # Speedometer 3: SKU Health Score
-                health_status = ""
-                if health_score >= 80:
-                    health_status = "🟢 Excellent"
-                elif health_score >= 50:
-                    health_status = "🟡 Moderate"
-                else:
-                    health_status = "🔴 Poor"
-                
-                fig_health = go.Figure(go.Indicator(
-                    mode="gauge+number",
-                    value=health_score,
-                    domain={'x': [0, 1], 'y': [0, 1]},
-                    title={'text': f"❤️ SKU Health<br><span style='font-size:0.7em;color:gray'>% Ideal Coverage</span>"},
-                    number={'suffix': "%"},
-                    gauge={
-                        'axis': {'range': [0, 100], 'tickwidth': 1},
-                        'bar': {'color': "#00BCD4"},
-                        'steps': [
-                            {'range': [0, 50], 'color': '#F44336'},
-                            {'range': [50, 80], 'color': '#FF9800'},
-                            {'range': [80, 100], 'color': '#4CAF50'}
-                        ],
-                        'threshold': {
-                            'line': {'color': "black", 'width': 3},
-                            'thickness': 0.75,
-                            'value': 80
-                        }
+            st.plotly_chart(fig_coverage, use_container_width=True)
+            st.caption(f"**{coverage_status}** | Based on {len(valid_coverage)} SKUs")
+        
+        with speed_col2:
+            # Speedometer 2: Warehouse Occupancy
+            wh_status = ""
+            if occupancy_percentage < 60:
+                wh_status = "🟢 Optimal"
+            elif occupancy_percentage < 80:
+                wh_status = "🟡 Moderate"
+            else:
+                wh_status = "🔴 Critical"
+            
+            fig_wh = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=occupancy_percentage,
+                domain={'x': [0, 1], 'y': [0, 1]},
+                title={
+                    'text': "WH Occupancy<br><span style='font-size:10px;color:gray'>250K capacity</span>",
+                    'font': {'size': 14}
+                },
+                number={
+                    'suffix': "%",
+                    'font': {'size': 24}
+                },
+                gauge={
+                    'axis': {'range': [0, 100], 'tickwidth': 1, 'tickfont': {'size': 10}},
+                    'bar': {'color': "#9C27B0"},
+                    'steps': [
+                        {'range': [0, 60], 'color': '#4CAF50'},
+                        {'range': [60, 80], 'color': '#FF9800'},
+                        {'range': [80, 100], 'color': '#F44336'}
+                    ],
+                    'threshold': {
+                        'line': {'color': "red", 'width': 4},
+                        'thickness': 0.75,
+                        'value': 80
                     }
-                ))
-                
-                fig_health.update_layout(
-                    height=250,
-                    margin=dict(t=50, b=30, l=20, r=20)
-                )
-                
-                st.plotly_chart(fig_health, use_container_width=True)
-                st.caption(f"**{health_status}** | {healthy_skus}/{total_regular_skus} SKUs ideal")
+                }
+            ))
+            
+            fig_wh.update_layout(
+                height=250,
+                margin=dict(t=40, b=30, l=20, r=20),
+                font={'size': 12}
+            )
+            
+            st.plotly_chart(fig_wh, use_container_width=True)
+            st.caption(f"**{wh_status}** | Available: {WH_CAPACITY - current_occupancy:,.0f} pcs")
+
             
             # Row 3: Warehouse Utilization Insights
             st.markdown("---")
