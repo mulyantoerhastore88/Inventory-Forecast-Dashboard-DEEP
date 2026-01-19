@@ -3280,14 +3280,14 @@ with tab3:
                     domain={'x': [0, 1], 'y': [0, 1]},
                     title={
                         'text': "WH Occupancy",  # Hanya judul utama
-                        'font': {'size': 16}
+                        'font': {'size': 18}
                     },
                     number={
                         'suffix': "%",
-                        'font': {'size': 28}
+                        'font': {'size': 32}
                     },
                     gauge={
-                        'axis': {'range': [0, 100], 'tickwidth': 1, 'tickfont': {'size': 9}},
+                        'axis': {'range': [0, 100], 'tickwidth': 1, 'tickfont': {'size': 11}},
                         'bar': {'color': "#9C27B0"},
                         'steps': [
                             {'range': [0, 60], 'color': '#4CAF50'},
